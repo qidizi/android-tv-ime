@@ -135,6 +135,9 @@ public class SoftKeyboard extends InputMethodService {
 
                 if (method.startsWith("get /")) {
                     // 请求首页
+                    // 特殊方式来判断是真机还是avd中
+                    String host = method.startsWith("get /?avd=1") ?
+                            "php.local.qidizi.com" : "www-public.qidizi.com";
                     client.getOutputStream().write((
                             "HTTP/1.1 200 OK\r\n"
                                     + "Content-Type: text/html;charset=UTF-8\r\n"
@@ -142,6 +145,7 @@ public class SoftKeyboard extends InputMethodService {
                                     + "Access-Control-Allow-Headers: *\r\n"
                                     + "\r\n"
                                     + getResources().getText(R.string.index_html)
+                                    .toString().replace("{host}", host)
                                     + "\r\n"
                     ).getBytes());
                     response = null;
@@ -179,6 +183,7 @@ public class SoftKeyboard extends InputMethodService {
                     return;
                 }
 
+                // todo 当前使用base64方式来上传方式,将导致数据大小变成3倍,后续要优化
                 while ((mark = isr.read(charBuf)) != -1) {
                     builder.append(charBuf, 0, mark);
                     if (mark < charBuf.length) {
@@ -268,18 +273,22 @@ public class SoftKeyboard extends InputMethodService {
     private void send_key(final String key) {
         // 向当前绑定到键盘的应用发送键盘事件
         final SoftKeyboard me = this;
-        new Thread(new Runnable() {
-
+        new Handler(Looper.getMainLooper()).post(new Runnable() {
+            @Override
             public void run() {
                 try {
-                    me.sendDownUpKeyEvents(KeyEvent.keyCodeFromString(key));
+                    int key_code = KeyEvent.keyCodeFromString(key);
+                    if (KeyEvent.KEYCODE_UNKNOWN == key_code)
+                        throw new Exception("按钮码无效");
+
+                    me.sendDownUpKeyEvents(key_code);
                     // 用adb shell 的input keyevent 和 Instrumentation.sendKeyDownUpSync需要root权限
                     // 用输入法方式,需要建立 getCurrentInputConnection 才行;
                 } catch (Exception e) {
                     toast("模拟按钮失败:" + e.getMessage());
                 }
             }
-        }).start();
+        });
     }
 
     void toast(final String msg) {
