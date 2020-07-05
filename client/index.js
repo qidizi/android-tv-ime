@@ -107,18 +107,18 @@ function new_app() {
                 this.post({action: 'send_key', key: key}, function (json) {
                     self.toast = json.msg + ' ' + json.time;
                 });
-            }
-            ,
+            },
             send_text() {
                 let self = this;
                 this.post({action: 'send_text', text: this.text}, function (json) {
                     self.toast = json.msg + ' ' + json.time;
                 });
-            }
-            ,
+            },
             play_url(url) {
                 let self = this;
-                this.post({action: 'play_url', url: url || this.media_url}, function (json) {
+                url = url || this.media_url;
+                url += (url.indexOf("?") > -1 ? "&" : "?") + "file=media.mp4";
+                this.post({action: 'play_url', url: url}, function (json) {
                     self.toast = json.msg + ' ' + json.time;
                 });
             }
