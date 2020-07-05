@@ -16,43 +16,43 @@
 
 package qidizi.tv_ime;
 
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
-import android.app.PendingIntent;
-import android.app.TaskStackBuilder;
-import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageManager;
-import android.graphics.Color;
 import android.inputmethodservice.InputMethodService;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.SystemClock;
-import android.view.InputDevice;
+import android.util.Base64;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.webkit.MimeTypeMap;
 import android.widget.Toast;
-import androidx.core.app.NotificationCompat;
-import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
 import org.json.JSONObject;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.InputStreamReader;
-import java.net.*;
+import java.io.OutputStream;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.text.SimpleDateFormat;
 import java.util.Date;
-import java.util.Enumeration;
+import java.util.Locale;
 
 public class SoftKeyboard extends InputMethodService {
+    final static int PORT = 11111;
     public volatile boolean httpd_running = false;
+    private String apk_path;
 
     @Override
     public void onCreate() {
         // 必须调用super
         super.onCreate();
+        create_httpd();
+        apk_path = getCacheDir().getAbsolutePath() + "/tmp.apk";
     }
 
     /**
@@ -78,25 +78,6 @@ public class SoftKeyboard extends InputMethodService {
         return super.onCreateInputView();
     }
 
-    private String get_lan_ipv4() {
-        try {
-            for (Enumeration<NetworkInterface> en = NetworkInterface
-                    .getNetworkInterfaces(); en.hasMoreElements(); ) {
-                NetworkInterface i_face = en.nextElement();
-                for (Enumeration<InetAddress> enumIpAddr = i_face
-                        .getInetAddresses(); enumIpAddr.hasMoreElements(); ) {
-                    InetAddress inetAddress = enumIpAddr.nextElement();
-                    // for getting IPV4 format
-                    if (!inetAddress.isLoopbackAddress() && inetAddress instanceof Inet4Address) {
-                        return inetAddress.getHostAddress();
-                    }
-                }
-            }
-        } catch (Exception ex) {
-            toast("无法获取电视IP:" + ex.toString());
-        }
-        return null;
-    }
 
     private void create_httpd() {
         if (httpd_running) return;
@@ -104,119 +85,161 @@ public class SoftKeyboard extends InputMethodService {
         Thread thread = new Thread() {
             @Override
             public void run() {
+                ServerSocket httpd;
                 try {
-                    ServerSocket httpd = new ServerSocket(
-                            11111, 50, Inet4Address.getByName("0.0.0.0")
-                    );
-
-                    if (!httpd.isBound()) {
-                        httpd_running = false;
-                        return;
-                    }
-                    toast(String.format("电视IP %s", get_lan_ipv4()));
-                    while (true) {
-                        Socket client = null;
-                        try {
-                            client = httpd.accept();
-                            StringBuilder builder = new StringBuilder();
-                            InputStreamReader isr = new InputStreamReader(client.getInputStream());
-                            char[] charBuf = new char[1024];
-                            int mark;
-                            while ((mark = isr.read(charBuf)) != -1) {
-                                builder.append(charBuf, 0, mark);
-                                if (mark < charBuf.length) {
-                                    break;
-                                }
-                            }
-
-                            String json = builder.toString();
-                            toast(String.format("收到信息:\n[%s]", json));
-                            json = json.substring(json.indexOf("\r\n\r\n") + 4);
-                            toast(String.format("收到信息:\n[%s]", json));
-                            JSONObject obj;
-                            String msg = "";
-                            int code = 500;
-
-                            if (json.isEmpty()) {
-                                msg = "post为空";
-                            } else {
-                                obj = new JSONObject(json);
-
-                                if (!obj.has("action")) {
-                                    msg = "post json 缺失 action 键";
-                                } else {
-                                    switch (obj.getString("action")) {
-                                        case "commit_text":
-                                            if (!obj.has("text")) {
-                                                msg = "commit_text 需要 text键";
-                                                break;
-                                            }
-
-                                            commit_text(obj.getString("text"));
-                                            code = 200;
-                                            msg = "处理完成";
-                                            break;
-                                        case "send_key":
-                                            if (!obj.has("key")) {
-                                                msg = "send_key 缺失 action 或 key 键";
-                                                code = 500;
-                                                break;
-                                            }
-                                            send_key_event(obj.getString("key"));
-                                            code = 200;
-                                            msg = "处理完成";
-                                            break;
-                                        case "play_media":
-                                            if (!obj.has("url")) {
-                                                msg = "play_media 缺失 url 键";
-                                                code = 500;
-                                                break;
-                                            }
-                                            play_media(obj.getString("url"));
-                                            code = 200;
-                                            msg = "处理完成";
-                                            break;
-                                        default:
-                                            code = 500;
-                                            msg = "action 无效";
-                                    }
-                                }
-                            }
-
-                            obj = new JSONObject();
-                            obj.put("code", code);
-                            obj.put("msg", msg);
-                            obj.put("time",
-                                    new SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
-                                            .format(new Date())
-                            );
-                            json = obj.toString();
-                            client.getOutputStream()
-                                    .write((
-                                            "HTTP/1.1 200 OK\r\n"
-                                                    + "Content-Type: application/json;charset=utf-8\r\n"
-                                                    + "Access-Control-Allow-Origin: *\r\n"
-                                                    + "Access-Control-Allow-Headers: *\r\n"
-                                                    + "\r\n"
-                                                    + json
-                                                    + "\r\n"
-                                    ).getBytes());
-                        } catch (Exception e) {
-                            toast("电视服务监听异常:" + e.getMessage());
-                        } finally {
-                            if (null != client) {
-                                client.close();
-                            }
-                        }
-                    }
-                } catch (
-                        Exception e) {
-                    toast("电视服务启动异常:" + e.getMessage());
+                    httpd = new ServerSocket(PORT);
+                } catch (Exception e) {
+                    toast("电视端启动失败:" + e.getMessage());
+                    return;
                 }
+
+                if (!httpd.isBound()) {
+                    //  todo 需要考虑如何再次尝试启动
+                    httpd_running = false;
+                    return;
+                }
+
+                toast("请打开【" + getResources().getString(R.string.app_name) + "】应用扫码控制电视");
+                //noinspection InfiniteLoopStatement
+                while (true) httpd_accept(httpd);
             }
         };
         thread.start();
+    }
 
+    private void httpd_accept(ServerSocket httpd) {
+        try (
+                Socket client = httpd.accept();
+                InputStreamReader isr = new InputStreamReader(client.getInputStream())
+        ) {
+            JSONObject response = new JSONObject();
+            response.put("code", 200);
+            response.put("msg", "已处理");
+            response.put("time",
+                    new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA).format(new Date())
+            );
+            try {
+                StringBuilder builder = new StringBuilder();
+                // GET HEAD POST OPTIONS PUT DELETE TRACE CONNECT
+                char[] charBuf = new char[20];
+                int mark;
+                // 先快速读出部分
+                mark = isr.read(charBuf);
+
+                if (mark < 1) {
+                    throw new Exception("httpd.accept数据为空");
+                }
+
+                builder.append(charBuf, 0, mark);
+                String method = builder.toString().toLowerCase();
+
+                if (method.startsWith("get /")) {
+                    // 请求首页
+                    client.getOutputStream().write((
+                            "HTTP/1.1 200 OK\r\n"
+                                    + "Content-Type: text/html;charset=UTF-8\r\n"
+                                    + "Access-Control-Allow-Origin: *\r\n"
+                                    + "Access-Control-Allow-Headers: *\r\n"
+                                    + "\r\n"
+                                    + getResources().getText(R.string.index_html)
+                                    + "\r\n"
+                    ).getBytes());
+                    response = null;
+                    return;
+                } else if (method.startsWith("post /")) {
+                    // 增加缓冲
+                    charBuf = new char[1024];
+                } else if (method.startsWith("options ")) {
+                    // 浏览器查询是否支持某些方法,或是否允许跨域
+                    client.getOutputStream().write((
+                            "HTTP/1.1 204 No Content\r\n" +
+                                    // 表示支持方法
+                                    "Allow: GET, POST, OPTIONS\r\n" +
+                                    // 允许跨域
+                                    "Access-Control-Allow-Origin: *\r\n" +
+                                    "Access-Control-Allow-Methods: *\r\n" +
+                                    "Access-Control-Allow-Headers: *\r\n" +
+                                    "\r\n" +
+                                    // 暂放空
+                                    " " +
+                                    "\r\n"
+                    ).getBytes());
+                    response = null;
+                    return;
+                } else {
+                    // 其它方法不支持; 暂不确定响应头就这样是否就ok
+                    client.getOutputStream().write((
+                            "HTTP/1.1 405 Method Not Allowed\r\n" +
+                                    "\r\n" +
+                                    // 暂放空
+                                    " " +
+                                    "\r\n"
+                    ).getBytes());
+                    response = null;
+                    return;
+                }
+
+                while ((mark = isr.read(charBuf)) != -1) {
+                    builder.append(charBuf, 0, mark);
+                    if (mark < charBuf.length) {
+                        break;
+                    }
+                }
+                String body = builder.toString();
+                body = body.substring(body.indexOf("\r\n\r\n") + 4).trim();
+                if (body.isEmpty()) throw new Exception("post不能为空");
+                JSONObject obj = new JSONObject(body);
+                if (!obj.has("action")) throw new Exception("post的json.action缺失");
+
+                switch (obj.getString("action")) {
+                    case "send_text":
+                        // 文字上屏
+                        if (!obj.has("text")) throw new Exception("send_text 的 json.text 缺失");
+                        send_text(obj.getString("text"));
+                        break;
+                    case "send_key":
+                        // 发送按键事件
+                        if (!obj.has("key")) throw new Exception("send_key 的 json.key 缺失");
+                        send_key(obj.getString("key"));
+                        break;
+                    case "play_url":
+                        // 播放远程视频
+                        if (!obj.has("url")) throw new Exception("play_url 的 json.url 缺失");
+                        play_url(obj.getString("url"));
+                        break;
+                    case "upload":
+                        // 上传文件
+                        if (!obj.has("name"))
+                            throw new Exception("upload 的 json.name 缺失");
+                        if (!obj.has("base64"))
+                            throw new Exception("upload 的 json.base64 缺失");
+                        String path = obj.getString("name");
+                        boolean is_apk = path.toLowerCase().endsWith(".apk");
+
+                        if (!is_apk) throw new Exception("目前只允许上传安卓应用文件(apk后缀)");
+                        install_apk(obj.getString("base64"));
+                        break;
+                    default:
+                        throw new Exception(obj.getString("action") + " action不支持");
+                }
+            } catch (Exception e) {
+                response.put("code", 500);
+                response.put("msg", e.getMessage());
+            } finally {
+                if (response != null)
+                    client.getOutputStream().write((
+                            "HTTP/1.1 200 OK\r\n"
+                                    + "Content-Type: application/json;charset=utf-8\r\n"
+                                    + "Access-Control-Allow-Origin: *\r\n"
+                                    + "Access-Control-Allow-Headers: *\r\n"
+                                    + "\r\n"
+                                    + response.toString()
+                                    + "\r\n"
+                    ).getBytes());
+            }
+        } catch (Exception e) {
+            toast("处理客户端请求失败:" + e.getMessage());
+        }
     }
 
     /**
@@ -230,7 +253,6 @@ public class SoftKeyboard extends InputMethodService {
     @Override
     public void onStartInputView(EditorInfo info, boolean restarting) {
         super.onStartInputView(info, restarting);
-        create_httpd();
     }
 
     private void destroy_httpd() {
@@ -243,143 +265,21 @@ public class SoftKeyboard extends InputMethodService {
         super.onDestroy();
     }
 
-    private void send_key_event(String key) {
+    private void send_key(final String key) {
         // 向当前绑定到键盘的应用发送键盘事件
-        InputConnection ic = getCurrentInputConnection();
-        long down_time = SystemClock.uptimeMillis();
-        long event_happen_time = SystemClock.uptimeMillis();
-        // 可以组合，表示控制键是否按下了,meta_state是按bit运算，只有指定位为1才表示on
-        // 这些常量是经过精心设计的，所有不会出现bit位冲突问题
+        final SoftKeyboard me = this;
+        new Thread(new Runnable() {
 
-        // 如
-
-        // META_ALT_LEFT_ON bit 为 10000
-        // META_ALT_ON bit 10
-        // META_ALT_RIGHT_ON bit 100000
-        // META_ALT_MASK bit 为110010
-
-        // META_ALT_LEFT_ON | META_ALT_ON | META_ALT_RIGHT_ON == META_ALT_MASK
-        // 如查询3个键状态时表示所有键都按下了，若只查询某个键即表示该键是按下状态
-
-        // 如查询 右 alt是否按下，作 META_ALT_MASK & META_ALT_RIGHT_ON == META_ALT_RIGHT_ON
-        // 如查询 左和右alt是否按下，作 META_ALT_MASK & META_ALT_RIGHT_ON ＆ META_ALT_LEFT_ON
-        // == META_ALT_RIGHT_ON ＆ META_ALT_LEFT_ON
-
-        // 其它以此类推
-        // 来源：0 表示是来自虚拟设备（不是物理设备），其它值表示是物理设备如蓝牙耳机
-        int device_id = 0;
-        // 硬件层面处理码，如打印机对于1，不同字体对应不同打印字
-        int scan_code = 0;
-        int repeat = 0;
-        // 表示长按时，定时自动发送按下事件序号，比如长按中共发送3次0、1、2，那么某些应用就可以选择只处理首次，其它忽视
-        // 比如防止用户放开时手慢本意按一次却变长按发送n次按下事件而执行多次操作
-//        if (KeyEvent.ACTION_DOWN != action) {
-//        }
-        // 控制键像alt、shift、ctrl是否按下了
-        // if (meta_state < 0) meta_state = 0;
-        // 击键来自虚拟键盘
-        int flags = KeyEvent.FLAG_SOFT_KEYBOARD;
-        // 表示击键来自键盘，还有屏幕触摸，游戏柄之类
-        int source = InputDevice.SOURCE_KEYBOARD;
-        int key_code = KeyEvent.keyCodeFromString(key);
-        int meta_state = 0;
-        KeyEvent ke = new KeyEvent(
-                down_time,
-                event_happen_time,
-                KeyEvent.ACTION_DOWN,
-                key_code,
-                // 像按下后，第几次自动发送的按下事件，比如给某些长按下只当一次处理的程序使用，那么它就可以只使用0这个后面都忽视
-                // 还有就是多个按键事件的事件数
-                repeat,
-                meta_state,
-                device_id,
-                scan_code,
-                flags,
-                source
-        );
-        ic.sendKeyEvent(ke);
-        ke = new KeyEvent(
-                down_time,
-                event_happen_time,
-                KeyEvent.ACTION_UP,
-                key_code,
-                // 像按下后，第几次自动发送的按下事件，比如给某些长按下只当一次处理的程序使用，那么它就可以只使用0这个后面都忽视
-                // 还有就是多个按键事件的事件数
-                repeat,
-                meta_state,
-                device_id,
-                scan_code,
-                flags,
-                source
-        );
-        ic.sendKeyEvent(ke);
-    }
-
-    private boolean have_permission(String permission, String name) {
-        // 检测是否拥有权限
-        if (
-                PackageManager.PERMISSION_GRANTED != ContextCompat.checkSelfPermission(
-                        this, permission
-                )
-        ) {
-            // 因为处于service中，无法获得activity，就不能使用
-            // ActivityCompat.shouldShowRequestPermissionRationale 及 ActivityCompat.requestPermissions
-            tip("请授予" + name + "权限后再试");
-            // 后台服务启动startActivity限制
-            // https://developer.android.com/guide/components/activities/background-starts
-            return false;
-        }
-
-        // 获得授权
-        return true;
-    }
-
-    void tip(String msg) {
-        NotificationManager n_man = (NotificationManager)
-                getSystemService(Context.NOTIFICATION_SERVICE);
-
-        if (null == n_man) {
-            toast(msg);
-            return;
-        }
-
-        String channel_id = "qidizi";
-        CharSequence channel_name = "qidizi";
-        String channel_desc = "qidizi app";
-
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-            // 这个版本需要创建通知的通道:高版本提供给用户可以关闭指定通道（分类）通知的能力，而不是全部应用的
-            NotificationChannel channel = new NotificationChannel(
-                    channel_id, channel_name, NotificationManager.IMPORTANCE_HIGH
-            );
-            channel.setDescription(channel_desc);
-            channel.enableLights(true);
-            channel.setLightColor(Color.RED);
-            channel.enableVibration(true);
-            channel.setVibrationPattern(new long[]{100, 200, 300, 400, 500, 400, 300, 200, 400});
-            // 不在应用图标上显示红点
-            channel.setShowBadge(false);
-            n_man.createNotificationChannel(channel);
-        }
-
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, channel_id)
-                .setSmallIcon(android.R.mipmap.sym_def_app_icon)
-                .setContentTitle("提示")
-                .setContentText(msg);
-        // 点击通知唤起主界面
-        Intent intent = new Intent(this, MainActivity.class);
-        // 创建状态栏的消息
-        TaskStackBuilder task_builder = TaskStackBuilder.create(this);
-        task_builder.addParentStack(MainActivity.class);
-        task_builder.addNextIntent(intent);
-        PendingIntent pending_intent = task_builder.getPendingIntent(0, PendingIntent.FLAG_UPDATE_CURRENT);
-        //  关联内容点击唤起那个界面
-        builder.setContentIntent(pending_intent);
-        // 相同的id，未消失的旧通知将会被替换
-        int notify_id = (int) System.currentTimeMillis() / 1000;
-        n_man.notify(notify_id, builder.build());
-
-
+            public void run() {
+                try {
+                    me.sendDownUpKeyEvents(KeyEvent.keyCodeFromString(key));
+                    // 用adb shell 的input keyevent 和 Instrumentation.sendKeyDownUpSync需要root权限
+                    // 用输入法方式,需要建立 getCurrentInputConnection 才行;
+                } catch (Exception e) {
+                    toast("模拟按钮失败:" + e.getMessage());
+                }
+            }
+        }).start();
     }
 
     void toast(final String msg) {
@@ -389,29 +289,32 @@ public class SoftKeyboard extends InputMethodService {
             public void run() {
                 Toast.makeText(
                         me, msg,
-                        Toast.LENGTH_SHORT
+                        Toast.LENGTH_LONG
                 ).show();
             }
         });
     }
 
-    private void commit_text(final String text) {
+    private void send_text(final String text) {
         final SoftKeyboard me = this;
         new Handler(Looper.getMainLooper()).post(new Runnable() {
             @Override
             public void run() {
                 // 发送的是字符串，非android支持的KEYCODE
                 InputConnection ic = me.getCurrentInputConnection();
-                if (ic == null) return;
-                ic.beginBatchEdit();// 提示输入框，只有收到end事件才代表本次输入结束
-                // 指针移动到最后,1表示插入字符并移动到最后
+                if (ic == null) {
+                    toast("无输入框");
+                    return;
+                }
+                // 先删除整个输入框内容
+                ic.deleteSurroundingText(100000, 100000);
                 ic.commitText(text, 1);
-                ic.endBatchEdit();
+                ic.closeConnection();
             }
         });
     }
 
-    private void play_media(final String url) {
+    private void play_url(final String url) {
         final SoftKeyboard me = this;
         new Handler(Looper.getMainLooper()).post(new Runnable() {
             @Override
@@ -421,12 +324,46 @@ public class SoftKeyboard extends InputMethodService {
                     String mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension);
                     Intent mediaIntent = new Intent(Intent.ACTION_VIEW);
                     mediaIntent.setDataAndType(Uri.parse(url), mimeType);
-                    toast(mimeType);
-                    startActivity(mediaIntent);
+                    me.startActivity(mediaIntent);
                 } catch (Exception e) {
                     toast("播放视频出错:" + e.getMessage());
                 }
             }
         });
+    }
+
+    // base64 的文件内容保存到文件
+    private void base64_to_file(String base64, File file) throws Exception {
+        if (base64 == null)
+            throw new Exception("无法保存文件:内容为空");
+
+        OutputStream out = new FileOutputStream(file);
+        String sub = "base64,";
+        base64 = base64.substring(base64.indexOf(sub) + sub.length());
+        out.write(Base64.decode(base64, Base64.NO_WRAP));
+        out.flush();
+        out.close();
+    }
+
+    private void install_apk(String base64) throws Exception {
+        File file = new File(apk_path);
+        base64_to_file(
+                base64,
+                file
+        );
+        toast("上传成功,准备安装...");
+        Intent intent = new Intent(Intent.ACTION_VIEW);
+        Uri apkUri;
+        // 这个要放到前面,防止替换掉 intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            // 注意当前通过 file_paths.xml 授权cache目录下可分享,所以file必须属于该目录下文件
+            apkUri = FileProvider.getUriForFile(this, "qidizi.tv_ime.provider", file);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } else {
+            apkUri = Uri.fromFile(file);
+        }
+        intent.setDataAndType(apkUri, "application/vnd.android.package-archive");
+        startActivity(intent);
     }
 }
