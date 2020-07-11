@@ -5,4 +5,4 @@
 
 截屏:   
 
-![控制端截图](screen.png) 
+![控制端截图](screen.jpg) 
