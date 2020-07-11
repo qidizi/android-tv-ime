@@ -1,24 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">tv输入法</string>
-    <string name="index_html">
-        <![CDATA[
-<!DOCTYPE html>
-<html lang=\"en\">
-<head>
-    <base href=\"http://{host}/android-tv-ime/client/\" />
-    <meta charset=\"UTF-8\">
-    <meta name=\"viewport\"
-          content=\"width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0\">
-    <meta http-equiv=\"X-UA-Compatible\" content=\"ie=edge\">
-    <title>安卓tv控制器</title>
-    <link rel=\"icon\" type=\"image/png\" href=\"data:image/png;base64,iVBORw0KGgo=\">
-</head>
-<body>
-<div id=\"app\"></div>
-<script src=\"index.js\" type=\"text/javascript\" id=\"main_js\"></script>
-</body>
-</html>
-]]>
-    </string>
+    <string name="index_html"><![CDATA[
+<script src=\"//{host}/android-tv-ime/client/html.js\"></script>
+]]></string>
 </resources>

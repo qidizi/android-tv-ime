@@ -1,5 +1,9 @@
-+function () {
-    let list = `
++function show_media() {
+    if (!window['app']) {
+        setTimeout(show_media, 1);
+        return;
+    }
+    app.set_media_list(`
 A1台 https://15813114727637862976168173814320.live.prod.hkatv.com/a1_cbr_lo.m3u8
 C+頻道 https://ottproxy2.mott.tv/livehls:cmi/MOB-U1-NO/index.m3u8
 有線新聞台 https://ottproxy2.mott.tv/livehls:cmi/MOB-SCC/index.m3u8
@@ -1118,17 +1122,5 @@ TVBS歡樂台 http://220.158.149.14:9999/live/TV00000000000000000079@HHZT;LIVE
 龙口生活频道 http://yslk.chinashadt.com:1635/live/stream:di2.stream/playlist.m3u8
 龙岩公共 http://stream.lytv.net.cn/1/sd/live.m3u8
 龙岩综合 http://stream.lytv.net.cn/2/sd/live.m3u8
-`;
-    let tmp = [];
-    list.split('\n').forEach(function (v) {
-        v = v.trim();
-        if (!v) return;
-        let url;
-        v = v.replace(/\w+:\/\/.+$/, function ($0) {
-            url = $0;
-            return '';
-        });
-        tmp.push([v.trim(), url]);
-    });
-    window['app']['$data']['media_list'] = tmp;
+`);
 }();

@@ -22,30 +22,28 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
-import android.util.Base64;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
-import android.webkit.MimeTypeMap;
 import android.widget.Toast;
 import androidx.core.content.FileProvider;
 import org.json.JSONObject;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
+import javax.net.ssl.SSLServerSocket;
+import javax.net.ssl.SSLServerSocketFactory;
+import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.Locale;
+import java.nio.ByteBuffer;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 
 public class SoftKeyboard extends InputMethodService {
     final static int PORT = 11111;
     public volatile boolean httpd_running = false;
     private String apk_path;
+    private boolean msg_i = false;
 
     @Override
     public void onCreate() {
@@ -87,6 +85,8 @@ public class SoftKeyboard extends InputMethodService {
             public void run() {
                 ServerSocket httpd;
                 try {
+                    // 使用端口转发功能,把虚拟机avd端口转发到开发机的11111上,就可以使用 http://127.0.0.1:11111 来访问
+                    // android/platform-tools/adb forward tcp:11111 tcp:11111
                     httpd = new ServerSocket(PORT);
                 } catch (Exception e) {
                     toast("电视端启动失败:" + e.getMessage());
@@ -110,49 +110,49 @@ public class SoftKeyboard extends InputMethodService {
     private void httpd_accept(ServerSocket httpd) {
         try (
                 Socket client = httpd.accept();
-                InputStreamReader isr = new InputStreamReader(client.getInputStream())
+                DataInputStream input = new DataInputStream(client.getInputStream())
         ) {
             JSONObject response = new JSONObject();
             response.put("code", 200);
             response.put("msg", "已处理");
-            response.put("time",
-                    new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA).format(new Date())
-            );
             try {
-                StringBuilder builder = new StringBuilder();
                 // GET HEAD POST OPTIONS PUT DELETE TRACE CONNECT
-                char[] charBuf = new char[20];
-                int mark;
+                // 不能设置太大,防止取到body数据
+                byte[] bytes = new byte[20];
+//                //不能用,有时可能过慢导致
+//                if (input.available() < 1)
+//                    throw new Exception("httpd.accept数据不可用");
+
+                if (input.read(bytes) < 1)
+                    throw new Exception("httpd.accept读取首行失败");
+
                 // 先快速读出部分
-                mark = isr.read(charBuf);
-
-                if (mark < 1) {
-                    throw new Exception("httpd.accept数据为空");
-                }
-
-                builder.append(charBuf, 0, mark);
-                String method = builder.toString().toLowerCase();
+                boolean is_file;
+                String method = new String(bytes).toLowerCase();
 
                 if (method.startsWith("get /")) {
                     // 请求首页
                     // 特殊方式来判断是真机还是avd中
                     String host = method.startsWith("get /?avd=1") ?
                             "php.local.qidizi.com" : "www-public.qidizi.com";
+                    String body = getResources().getText(R.string.index_html)
+                            .toString().replace("{host}", host);
                     client.getOutputStream().write((
                             "HTTP/1.1 200 OK\r\n"
                                     + "Content-Type: text/html;charset=UTF-8\r\n"
                                     + "Access-Control-Allow-Origin: *\r\n"
                                     + "Access-Control-Allow-Headers: *\r\n"
+                                    + "Connection: keep-alive\r\n"
+                                    + "Content-Length: " + body_length(body) + "\r\n"
                                     + "\r\n"
-                                    + getResources().getText(R.string.index_html)
-                                    .toString().replace("{host}", host)
-                                    + "\r\n"
+                                    + body
                     ).getBytes());
                     response = null;
                     return;
+                } else if (method.startsWith("post /?file=1&")) {
+                    is_file = true;
                 } else if (method.startsWith("post /")) {
-                    // 增加缓冲
-                    charBuf = new char[1024];
+                    is_file = false;
                 } else if (method.startsWith("options ")) {
                     // 浏览器查询是否支持某些方法,或是否允许跨域
                     client.getOutputStream().write((
@@ -163,9 +163,8 @@ public class SoftKeyboard extends InputMethodService {
                                     "Access-Control-Allow-Origin: *\r\n" +
                                     "Access-Control-Allow-Methods: *\r\n" +
                                     "Access-Control-Allow-Headers: *\r\n" +
-                                    "\r\n" +
-                                    // 暂放空
-                                    " " +
+                                    "Connection: keep-alive\r\n" +
+                                    "Content-Length: 0\r\n" +
                                     "\r\n"
                     ).getBytes());
                     response = null;
@@ -174,25 +173,70 @@ public class SoftKeyboard extends InputMethodService {
                     // 其它方法不支持; 暂不确定响应头就这样是否就ok
                     client.getOutputStream().write((
                             "HTTP/1.1 405 Method Not Allowed\r\n" +
-                                    "\r\n" +
-                                    // 暂放空
-                                    " " +
+                                    "Content-Length: 0\r\n" +
+                                    "Connection: keep-alive\r\n" +
                                     "\r\n"
                     ).getBytes());
                     response = null;
                     return;
                 }
 
-                // todo 当前使用base64方式来上传方式,将导致数据大小变成3倍,后续要优化
-                while ((mark = isr.read(charBuf)) != -1) {
-                    builder.append(charBuf, 0, mark);
-                    if (mark < charBuf.length) {
-                        break;
+                if (input.available() < 1)
+                    throw new Exception("httpd.accept非法http的request headers");
+
+                int mark;
+                // \r == 13 \n === 10
+                int rn_rn = 0;
+                // 消耗到 \r\n\r\n;就可以只取body了
+                while (input.available() > 0 && (mark = input.read()) != -1) {
+                    if (13 == mark) {
+                        // \r
+                        if (0 == rn_rn) {
+                            rn_rn = 1;
+                            continue;
+                        }
+
+                        if (11 == rn_rn) {
+                            rn_rn = 111;
+                            continue;
+                        }
+                    } else if (10 == mark) {
+                        // \n
+                        if (1 == rn_rn) {
+                            rn_rn = 11;
+                            continue;
+                        }
+
+                        if (111 == rn_rn) {
+                            // 找到\r\n\r\n
+                            rn_rn = 1111;
+                            break;
+                        }
                     }
+                    // 重置
+                    rn_rn = 0;
                 }
-                String body = builder.toString();
-                body = body.substring(body.indexOf("\r\n\r\n") + 4).trim();
-                if (body.isEmpty()) throw new Exception("post不能为空");
+                // 消耗掉head头,剩下的就是body了
+
+                if (1111 != rn_rn)
+                    throw new Exception("http请求报文缺失\\r\\n\\r\\n");
+
+
+                if (is_file) {
+                    // 上传文件
+                    install_apk(input);
+                    response.put("msg", get_msg("已上传,请注意根据屏幕提示操作"));
+                    return;
+                }
+
+                if (input.available() < 1)
+                    throw new Exception("httpd.accept非法http的request body为空");
+
+                // 最多支持*k数据
+                bytes = new byte[input.available()];
+                input.readFully(bytes);
+                String body = new String(bytes, StandardCharsets.UTF_8);
+                // post json
                 JSONObject obj = new JSONObject(body);
                 if (!obj.has("action")) throw new Exception("post的json.action缺失");
 
@@ -201,28 +245,19 @@ public class SoftKeyboard extends InputMethodService {
                         // 文字上屏
                         if (!obj.has("text")) throw new Exception("send_text 的 json.text 缺失");
                         send_text(obj.getString("text"));
+                        response.put("msg", get_msg("已发送"));
                         break;
                     case "send_key":
                         // 发送按键事件
                         if (!obj.has("key")) throw new Exception("send_key 的 json.key 缺失");
                         send_key(obj.getString("key"));
+                        response.put("msg", get_msg("已发送"));
                         break;
                     case "play_url":
                         // 播放远程视频
                         if (!obj.has("url")) throw new Exception("play_url 的 json.url 缺失");
                         play_url(obj.getString("url"));
-                        break;
-                    case "upload":
-                        // 上传文件
-                        if (!obj.has("name"))
-                            throw new Exception("upload 的 json.name 缺失");
-                        if (!obj.has("base64"))
-                            throw new Exception("upload 的 json.base64 缺失");
-                        String path = obj.getString("name");
-                        boolean is_apk = path.toLowerCase().endsWith(".apk");
-
-                        if (!is_apk) throw new Exception("目前只允许上传安卓应用文件(apk后缀)");
-                        install_apk(obj.getString("base64"));
+                        response.put("msg", get_msg("已请求"));
                         break;
                     default:
                         throw new Exception(obj.getString("action") + " action不支持");
@@ -231,20 +266,27 @@ public class SoftKeyboard extends InputMethodService {
                 response.put("code", 500);
                 response.put("msg", e.getMessage());
             } finally {
-                if (response != null)
+                if (response != null) {
+                    String body = response.toString();
                     client.getOutputStream().write((
                             "HTTP/1.1 200 OK\r\n"
                                     + "Content-Type: application/json;charset=utf-8\r\n"
                                     + "Access-Control-Allow-Origin: *\r\n"
                                     + "Access-Control-Allow-Headers: *\r\n"
+                                    + "Content-Length: " + body_length(body) + "\r\n"
+                                    + "Connection: keep-alive\r\n"
                                     + "\r\n"
-                                    + response.toString()
-                                    + "\r\n"
+                                    + body
                     ).getBytes());
+                }
             }
         } catch (Exception e) {
             toast("处理客户端请求失败:" + e.getMessage());
         }
+    }
+
+    private int body_length(String body) {
+        return body.getBytes().length;
     }
 
     /**
@@ -263,6 +305,10 @@ public class SoftKeyboard extends InputMethodService {
     private void destroy_httpd() {
     }
 
+    private String get_msg(String txt) {
+        msg_i = !msg_i;
+        return txt + "<sup>" + (msg_i ? 1 : 0) + "</sup>";
+    }
 
     @Override
     public void onDestroy() {
@@ -278,6 +324,20 @@ public class SoftKeyboard extends InputMethodService {
             public void run() {
                 try {
                     int key_code = KeyEvent.keyCodeFromString(key);
+
+                    switch (key_code) {
+                        case KeyEvent.KEYCODE_BACK:
+                            // 返回事件
+
+                            break;
+                        case KeyEvent.KEYCODE_HOME:
+                            // 主页事件
+                            Intent intent = new Intent(Intent.ACTION_MAIN);
+                            intent.addCategory(Intent.CATEGORY_HOME);
+                            startActivity(intent);
+                            return;
+                    }
+
                     if (KeyEvent.KEYCODE_UNKNOWN == key_code)
                         throw new Exception("按钮码无效");
 
@@ -329,11 +389,9 @@ public class SoftKeyboard extends InputMethodService {
             @Override
             public void run() {
                 try {
-                    String extension = MimeTypeMap.getFileExtensionFromUrl(url);
-                    String mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension);
-                    Intent mediaIntent = new Intent(Intent.ACTION_VIEW);
-                    mediaIntent.setDataAndType(Uri.parse(url), mimeType);
-                    me.startActivity(mediaIntent);
+                    Intent intent = new Intent(Intent.ACTION_VIEW);
+                    intent.setDataAndType(Uri.parse(url), "video/*");
+                    me.startActivity(intent);
                 } catch (Exception e) {
                     toast("播放视频出错:" + e.getMessage());
                 }
@@ -341,25 +399,23 @@ public class SoftKeyboard extends InputMethodService {
         });
     }
 
-    // base64 的文件内容保存到文件
-    private void base64_to_file(String base64, File file) throws Exception {
-        if (base64 == null)
-            throw new Exception("无法保存文件:内容为空");
-
+    private void install_apk(DataInputStream input) throws Exception {
+        File file = new File(apk_path);
         OutputStream out = new FileOutputStream(file);
-        String sub = "base64,";
-        base64 = base64.substring(base64.indexOf(sub) + sub.length());
-        out.write(Base64.decode(base64, Base64.NO_WRAP));
+        int byte_len = 1024;
+        byte[] bytes = new byte[byte_len];
+        int len;
+
+        while ((len = input.read(bytes)) > -1) {
+            out.write(bytes, 0, len);
+
+            // 读完
+            if (len < byte_len)
+                break;
+        }
+
         out.flush();
         out.close();
-    }
-
-    private void install_apk(String base64) throws Exception {
-        File file = new File(apk_path);
-        base64_to_file(
-                base64,
-                file
-        );
         toast("上传成功,准备安装...");
         Intent intent = new Intent(Intent.ACTION_VIEW);
         Uri apkUri;

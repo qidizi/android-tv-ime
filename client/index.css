@@ -1,15 +1,17 @@
 * {
     box-sizing: border-box;
+    resize: none;
 }
 
 html {
-    font-size: 62.5%; /*10 ÷ 16 × 100% = 62.5%*/
+    font-size: 62.5%;
 }
 
 body {
     margin: 0;
     text-align: center;
     padding: 0;
+    color: black;
 }
 
 #app {
@@ -25,6 +27,8 @@ body {
     border: 1px none red;
     margin: 10px auto;
     display: block;
+    color: white;
+    text-align: center;
 }
 
 .pad_left {
@@ -37,6 +41,7 @@ body {
     border-radius: 100% 0 0 0;
     z-index: 0;
     transform: rotate(-45deg);
+    line-height: 50px;
 }
 
 .pad_up {
@@ -49,6 +54,7 @@ body {
     border-radius: 100% 0 0 0;
     z-index: 0;
     transform: rotate(45deg);
+    line-height: 50px;
 }
 
 .pad_right {
@@ -61,6 +67,7 @@ body {
     border-radius: 100% 0 0 0;
     z-index: 0;
     transform: rotate(135deg);
+    line-height: 50px;
 }
 
 .pad_down {
@@ -73,6 +80,7 @@ body {
     border-radius: 100% 0 0 0;
     z-index: 0;
     transform: rotate(225deg);
+    line-height: 50px;
 }
 
 .pad_center {
@@ -80,10 +88,11 @@ body {
     left: 50px;
     width: 50px;
     height: 50px;
-    background-color: orange;
+    background-color: mediumblue;
     border-radius: 100%;
     z-index: 1;
     position: absolute;
+    line-height: 50px;
 }
 
 .key {
@@ -91,8 +100,7 @@ body {
     height: 30px;
     margin: 5px;
     display: inline-block;
-    background-color: cornflowerblue;
-    border: 1px solid darkblue;
+    background-color: black;
     cursor: pointer;
     color: white;
     line-height: 30px;
@@ -155,7 +163,35 @@ body {
 .file_input {
     height: 50px;
 }
-.media_list{
+
+.media_list {
     clear: both;
     text-align: left;
+}
+
+.to_top {
+    position: fixed;
+    bottom: 10px;
+    right: 0;
+    opacity: 0.7;
+    background-color: black;
+    color: white;
+    z-index: 1;
+    border-radius: 100%;
+    font-size: 1rem;
+    padding: 5px;
+}
+
+.filter {
+    width: 100%;
+    text-align: center;
+    padding: 5px;
+}
+
+li.url {
+    padding: 5px 0;
+}
+
+form {
+    display: block;
 }
