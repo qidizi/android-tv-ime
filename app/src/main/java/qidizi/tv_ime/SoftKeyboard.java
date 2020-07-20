@@ -23,27 +23,28 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.KeyEvent;
-import android.view.View;
-import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.widget.Toast;
 import androidx.core.content.FileProvider;
 import org.json.JSONObject;
 
-import javax.net.ssl.SSLServerSocket;
-import javax.net.ssl.SSLServerSocketFactory;
-import java.io.*;
-import java.net.ServerSocket;
-import java.net.Socket;
-import java.nio.ByteBuffer;
-import java.nio.charset.Charset;
+import java.io.DataInputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
+import java.net.*;
 import java.nio.charset.StandardCharsets;
+import java.util.Enumeration;
 
 public class SoftKeyboard extends InputMethodService {
     final static int PORT = 11111;
     public volatile boolean httpd_running = false;
     private String apk_path;
     private boolean msg_i = false;
+    final static String HOST_LOCAL = "php.local.qidizi.com";
+    // avd网关(开发电脑)
+    final static String HOST_DEV = "10.0.2.2";
+    final static String HOST_REMOTE = "www-public.qidizi.com";
 
     @Override
     public void onCreate() {
@@ -53,29 +54,18 @@ public class SoftKeyboard extends InputMethodService {
         apk_path = getCacheDir().getAbsolutePath() + "/tmp.apk";
     }
 
-    /**
-     * 方法用于用户界面初始化，主要用于service运行过程中配置信息发生改变的情况（横竖屏转换等）。
-     */
-    @Override
-    public void onInitializeInterface() {
-        super.onInitializeInterface();
-
+    static boolean is_android_avd() {
+        return Build.FINGERPRINT.startsWith("generic")
+                || Build.FINGERPRINT.startsWith("unknown")
+                || Build.MODEL.contains("google_sdk")
+                || Build.MODEL.contains("Emulator")
+                || Build.MODEL.contains("Android SDK built for x86")
+                || "QC_Reference_Phone".equals(Build.BOARD)//bluestacks
+                || Build.MANUFACTURER.contains("Genymotion")
+                || Build.HOST.startsWith("Build") //MSI App Player
+                || (Build.BRAND.startsWith("generic") && Build.DEVICE.startsWith("generic"))
+                || "google_sdk".equals(Build.PRODUCT);
     }
-
-    /**
-     * 方法用于创建并返回（input area）输入区域的层次视图，该方法只被调用一次（输入区域第一次显示时），
-     * 该方法可以返回null，此时输入法不存在输入区域，InputMethodService的默认方法实现返回值为空，
-     * 想要改变已经创建的输入区域视图，我们可以调用setInputView(View)方法，想要控制何时显示输入视图，
-     * 我们可以实现onEvaluateInputViewShown方法，该方法用来判断输入区域是否应该显示，
-     * 在updateInputViewShown方法中会调用onEvaluateInputViewShown方法来判断是否显示输入区域。
-     *
-     * @return View
-     */
-    @Override
-    public View onCreateInputView() {
-        return super.onCreateInputView();
-    }
-
 
     private void create_httpd() {
         if (httpd_running) return;
@@ -132,11 +122,10 @@ public class SoftKeyboard extends InputMethodService {
 
                 if (method.startsWith("get /")) {
                     // 请求首页
-                    // 特殊方式来判断是真机还是avd中
-                    String host = method.startsWith("get /?avd=1") ?
-                            "php.local.qidizi.com" : "www-public.qidizi.com";
-                    String body = getResources().getText(R.string.index_html)
-                            .toString().replace("{host}", host);
+                    String body = String.format(
+                            "<script src='%s/html.js?r=%d'></script>",
+                            get_client_url(), System.currentTimeMillis()
+                    );
                     client.getOutputStream().write((
                             "HTTP/1.1 200 OK\r\n"
                                     + "Content-Type: text/html;charset=UTF-8\r\n"
@@ -289,18 +278,18 @@ public class SoftKeyboard extends InputMethodService {
         return body.getBytes().length;
     }
 
-    /**
-     * onStartInputView方法 输入视图正在显示并且编辑框输入已经开始的时候回调该方法，
-     * onStartInputView方法总会在onStartInput方法之后被调用，普通的设置可以在onStartInput方法中进行，
-     * 在onStartInputView方法中进行视图相关的设置，开发者应该保证onCreateInputView方法在该方法被调用之前调用。
-     *
-     * @param info       输入框的信息
-     * @param restarting 是否重新启动
-     */
-    @Override
-    public void onStartInputView(EditorInfo info, boolean restarting) {
-        super.onStartInputView(info, restarting);
-    }
+//    /**
+//     * onStartInputView方法 输入视图正在显示并且编辑框输入已经开始的时候回调该方法，
+//     * onStartInputView方法总会在onStartInput方法之后被调用，普通的设置可以在onStartInput方法中进行，
+//     * 在onStartInputView方法中进行视图相关的设置，开发者应该保证onCreateInputView方法在该方法被调用之前调用。
+//     *
+//     * @param info       输入框的信息
+//     * @param restarting 是否重新启动
+//     */
+//    @Override
+//    public void onStartInputView(EditorInfo info, boolean restarting) {
+//        super.onStartInputView(info, restarting);
+//    }
 
     private void destroy_httpd() {
     }
@@ -385,19 +374,13 @@ public class SoftKeyboard extends InputMethodService {
 
     private void play_url(final String url) {
         final SoftKeyboard me = this;
-        new Handler(Looper.getMainLooper()).post(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    Intent intent = new Intent(Intent.ACTION_VIEW);
-                    intent.setDataAndType(Uri.parse(url), "video/*");
-                    me.startActivity(intent);
-                } catch (Exception e) {
-                    toast("播放视频出错:" + e.getMessage());
-                }
-            }
-        });
+        Intent intent = new Intent(me, MainActivity.class);
+        intent.putExtra("url", url);
+        // 在当前堆中,只能有一个
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        me.startActivity(intent);
     }
+
 
     private void install_apk(DataInputStream input) throws Exception {
         File file = new File(apk_path);
@@ -430,5 +413,41 @@ public class SoftKeyboard extends InputMethodService {
         }
         intent.setDataAndType(apkUri, "application/vnd.android.package-archive");
         startActivity(intent);
+    }
+
+    static String get_client_url() {
+        return String.format(
+                "http://%s/android-tv-ime/client",
+                is_android_avd() ? HOST_LOCAL : HOST_REMOTE
+        );
+    }
+
+    static String get_webview_url() {
+        return String.format(
+                "http://%s/android-tv-ime/client",
+                is_android_avd() ? HOST_DEV : HOST_REMOTE
+        );
+    }
+
+     static String get_lan_ipv4() {
+        try {
+            for (Enumeration<NetworkInterface> en = NetworkInterface
+                    .getNetworkInterfaces(); en.hasMoreElements(); ) {
+                NetworkInterface i_face = en.nextElement();
+                // 如果是移动网络不要
+                if (i_face.getName().toLowerCase().startsWith("radio0"))
+                    continue;
+                for (Enumeration<InetAddress> enumIpAddr = i_face
+                        .getInetAddresses(); enumIpAddr.hasMoreElements(); ) {
+                    InetAddress inetAddress = enumIpAddr.nextElement();
+                    // for getting IPV4 format
+                    if (!inetAddress.isLoopbackAddress() && inetAddress instanceof Inet4Address) {
+                        return inetAddress.getHostAddress();
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
     }
 }

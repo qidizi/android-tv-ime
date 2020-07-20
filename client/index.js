@@ -8,7 +8,7 @@
         el: '#app',
         data: {
             toast: '',
-            media_url: '',
+            media_url: 'https://www.babakk.com/guochanju/meirenmubaishou/1-42.html?__web__',
             text: '',
             media_list: [],
             filter: ''
@@ -95,9 +95,7 @@
                     return;
                 }
 
-                self.xhr(file, function (json) {
-                    self.toast = json['msg'];
-                });
+                self.xhr(file);
             },
             "send_key"(key) {
                 this.xhr({action: 'send_key', key: key});
@@ -106,7 +104,22 @@
                 this.xhr({action: 'send_text', text: this.text});
             },
             "play_url"(url) {
-                this.xhr({action: 'play_url', url: url || this.media_url});
+                url = String(url || this.media_url).trim();
+                if (!url) return;
+                url += url.indexOf('?') > -1 ? '' : '?';
+
+                if (url.toLowerCase().indexOf('.m3u8') > -1) {
+                    url += '&ext=m3u8';
+                } else if (0 === url.toLowerCase().indexOf('rtmp')) {
+                    url += '&ext=rtmp';
+                } else if (url.toLowerCase().indexOf('__web__') < 0) {
+                    // 如果不是网页
+                    this.toast = '无法确定后缀名';
+                    return;
+                }
+
+                // this.media_url = url;
+                this.xhr({action: 'play_url', url: url});
             }
         }
     });

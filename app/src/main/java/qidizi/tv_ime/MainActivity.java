@@ -1,172 +1,292 @@
 package qidizi.tv_ime;
 
+import android.annotation.SuppressLint;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Color;
-import android.graphics.Typeface;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
-import android.text.Spannable;
 import android.text.SpannableString;
-import android.text.TextUtils;
 import android.text.style.ImageSpan;
+import android.util.Log;
 import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.webkit.*;
 import android.widget.TextView;
+import android.widget.Toast;
+import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
+import com.google.android.exoplayer2.C;
+import com.google.android.exoplayer2.ExoPlaybackException;
+import com.google.android.exoplayer2.Player;
+import com.google.android.exoplayer2.SimpleExoPlayer;
+import com.google.android.exoplayer2.ext.rtmp.RtmpDataSourceFactory;
+import com.google.android.exoplayer2.source.MediaSource;
+import com.google.android.exoplayer2.source.ProgressiveMediaSource;
+import com.google.android.exoplayer2.source.dash.DashMediaSource;
+import com.google.android.exoplayer2.source.hls.HlsMediaSource;
+import com.google.android.exoplayer2.source.smoothstreaming.SsMediaSource;
+import com.google.android.exoplayer2.ui.PlayerView;
+import com.google.android.exoplayer2.upstream.DataSource;
+import com.google.android.exoplayer2.upstream.DefaultDataSourceFactory;
+import com.google.android.exoplayer2.util.Util;
 import com.google.zxing.BarcodeFormat;
-import com.google.zxing.EncodeHintType;
 import com.google.zxing.common.BitMatrix;
 import com.google.zxing.qrcode.QRCodeWriter;
 
-import java.net.Inet4Address;
-import java.net.InetAddress;
-import java.net.NetworkInterface;
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.Enumeration;
-import java.util.Hashtable;
-import java.util.Locale;
-
 public class MainActivity extends AppCompatActivity {
-    private TextView tv;
-    private final MainActivity activity = this;
-    private final Handler qr_code_handler = new Handler();
-    private final Runnable qr_code_run = new Runnable() {
-        @Override
-        public void run() {
-            // 定时刷新2维码
-            String url = "http://" + get_lan_ipv4() + ":"
-                    + SoftKeyboard.PORT + "/?r=" +
-                    new SimpleDateFormat("yyyy.MM.dd-HH_mm_ss", Locale.CHINA)
-                            .format(new Date());
-            Bitmap bitmap = get_qr_code_bitmap(
-                    url,
-                    200, 200,
-                    "UTF-8",
-                    "H", "1",
-                    Color.BLACK, Color.WHITE
-            );
+    private WebView webView;
 
-            if (null == bitmap) {
-                tv.setText(new StringBuilder("生成二维码失败,请在手机浏览器中手动输入如下网址来控制电视\n" + url));
-            } else {
-                ImageSpan imgSpan = new ImageSpan(activity, bitmap);
-                SpannableString spannableString = new SpannableString(" ");
-                spannableString.setSpan(imgSpan, 0, 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-                tv.setText(spannableString);
-                tv.append("\n微信扫码 控制电视\n" + url);
-            }
-            qr_code_handler.postDelayed(this, 2000);
-        }
-    };
-
-    private String get_lan_ipv4() {
-        try {
-            for (Enumeration<NetworkInterface> en = NetworkInterface
-                    .getNetworkInterfaces(); en.hasMoreElements(); ) {
-                NetworkInterface i_face = en.nextElement();
-                // 如果是移动网络不要
-                if (i_face.getName().toLowerCase().startsWith("radio0"))
-                    continue;
-                for (Enumeration<InetAddress> enumIpAddr = i_face
-                        .getInetAddresses(); enumIpAddr.hasMoreElements(); ) {
-                    InetAddress inetAddress = enumIpAddr.nextElement();
-                    // for getting IPV4 format
-                    if (!inetAddress.isLoopbackAddress() && inetAddress instanceof Inet4Address) {
-                        return inetAddress.getHostAddress();
-                    }
-                }
-            }
-        } catch (Exception ignored) {
-        }
-        return null;
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        open_url(intent);
     }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        tv = new TextView(this);
-        tv.setClickable(false);
-        tv.setPadding(50, 50, 50, 50);
-        tv.setTypeface(Typeface.MONOSPACE, Typeface.NORMAL);
-        tv.setGravity(Gravity.CENTER);
-        setContentView(tv);
+        // 唤醒键盘服务
+        Intent intent = new Intent(this, SoftKeyboard.class);
+        startService(intent);
+        String url = getIntent().getStringExtra("url");
+
+        if (null == url) {
+            create_qr();
+            return;
+        }
+
+        open_url(getIntent());
+    }
+
+    private void play_url(String url) {
+        SimpleExoPlayer simpleExoPlayer = new SimpleExoPlayer.Builder(this).build();
+        PlayerView playerView = new PlayerView(this);
+        playerView.setPlayer(simpleExoPlayer);
+        setContentView(playerView);
+
+        DataSource.Factory dataSourceFactory = new DefaultDataSourceFactory(this,
+                Util.getUserAgent(this, getResources().getString(R.string.app_name)));
+        MediaSource videoSource;
+        Uri uri = Uri.parse(url);
+        String extension;
+        extension = uri.getQueryParameter("ext");
+
+        if (null == extension) {
+            toast("请指定后缀ext参数");
+            return;
+        }
+
+        @C.ContentType int type = Util.inferContentType(uri, extension);
+        switch (type) {
+            case C.TYPE_DASH:
+                videoSource = new DashMediaSource.Factory(dataSourceFactory).createMediaSource(uri);
+                break;
+            case C.TYPE_SS:
+                videoSource = new SsMediaSource.Factory(dataSourceFactory).createMediaSource(uri);
+                break;
+            case C.TYPE_HLS:
+                videoSource = new HlsMediaSource.Factory(dataSourceFactory).createMediaSource(uri);
+                break;
+            case C.TYPE_OTHER:
+                videoSource = new ProgressiveMediaSource.Factory(dataSourceFactory).createMediaSource(uri);
+                break;
+            default:
+                if ("rtmp".equals(extension)) {
+                    videoSource = new ProgressiveMediaSource.Factory(new RtmpDataSourceFactory()).createMediaSource(uri);
+                    break;
+                }
+
+                toast("Unsupported type: " + type);
+                return;
+        }
+
+        simpleExoPlayer.prepare(videoSource);
+        simpleExoPlayer.setVolume(1);
+        simpleExoPlayer.setPlayWhenReady(true);
+        simpleExoPlayer.addListener(new Player.EventListener() {
+            @Override
+            public void onPlayerError(@NonNull ExoPlaybackException error) {
+                toast("视频加载失败:\n" + error.getMessage());
+            }
+        });
+    }
+
+    private void create_qr() {
+        try {
+            BitMatrix result = new QRCodeWriter().encode(
+                    String.format("http://%s:%s/",
+                            SoftKeyboard.get_lan_ipv4(),
+                            SoftKeyboard.PORT), BarcodeFormat.QR_CODE, 300, 300);
+            Bitmap bitMap = Bitmap.createBitmap(result.getWidth(), result.getHeight(), Bitmap.Config.ARGB_8888);
+
+            for (int y = 0; y < result.getHeight(); y++) {
+                for (int x = 0; x < result.getWidth(); x++) {
+                    if (result.get(x, y)) {
+                        bitMap.setPixel(x, y, Color.BLACK);
+                    }
+                }
+            }
+
+            TextView textView = new TextView(this);
+            textView.setBackgroundColor(Color.WHITE);
+            textView.setTextAlignment(View.TEXT_ALIGNMENT_CENTER);
+            textView.setTextColor(Color.BLUE);
+            textView.setTextSize(30);
+            textView.setGravity(Gravity.CENTER);
+            ImageSpan imageSpan = new ImageSpan(this, bitMap, ImageSpan.ALIGN_CENTER);
+            SpannableString spannableString = new SpannableString(" \n");
+            spannableString.setSpan(imageSpan, 0, 1, SpannableString.SPAN_INCLUSIVE_INCLUSIVE);
+            textView.append(spannableString);
+            textView.append("微信扫码 遥控电视");
+            setContentView(textView);
+        } catch (Exception e) {
+            toast("创建二维码失败:" + e.getMessage());
+        }
     }
 
     @Override
     protected void onPause() {
         super.onPause();
         // 界面不可见时,停止刷新2维码
-        qr_code_handler.removeCallbacks(qr_code_run);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         // 界面可见时,开始定时刷新2维码
-        qr_code_handler.post(qr_code_run);
     }
 
-    /**
-     * 生成简单二维码
-     *
-     * @param content                字符串内容
-     * @param width                  二维码宽度
-     * @param height                 二维码高度
-     * @param character_set          编码方式（一般使用UTF-8）
-     * @param error_correction_level 容错率 L：7% M：15% Q：25% H：35%
-     * @param margin                 空白边距（二维码与边框的空白区域）
-     * @param color_black            黑色色块
-     * @param color_white            白色色块
-     * @return BitMap
-     */
-    public static Bitmap get_qr_code_bitmap(String content, int width, int height,
-                                            String character_set, String error_correction_level,
-                                            String margin, int color_black, int color_white) {
-        // 字符串内容判空
-        if (TextUtils.isEmpty(content)) {
-            return null;
-        }
-        // 宽和高>=0
-        if (width < 0 || height < 0) {
-            return null;
-        }
-        try {
-            /* 1.设置二维码相关配置 */
-            Hashtable<EncodeHintType, String> hints = new Hashtable<>();
-            // 字符转码格式设置
-            if (!TextUtils.isEmpty(character_set)) {
-                hints.put(EncodeHintType.CHARACTER_SET, character_set);
-            }
-            // 容错率设置
-            if (!TextUtils.isEmpty(error_correction_level)) {
-                hints.put(EncodeHintType.ERROR_CORRECTION, error_correction_level);
-            }
-            // 空白边距设置
-            if (!TextUtils.isEmpty(margin)) {
-                hints.put(EncodeHintType.MARGIN, margin);
-            }
-            /* 2.将配置参数传入到QRCodeWriter的encode方法生成BitMatrix(位矩阵)对象 */
-            BitMatrix bitMatrix = new QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, width, height, hints);
+    @SuppressLint({"SetJavaScriptEnabled", "JavascriptInterface", "AddJavascriptInterface"})
+    private void create_webview() {
+        // 防止重复创建，以内存换html启动时间
+        if (null != webView) return;
+        webView = new WebView(this);
+        WebSettings webSettings = webView.getSettings();
+        // 允许file协议的文件通过js的xhr能力访问其它协议的文件，不受跨域策略限制；注意非js访问方式无效；
+        webSettings.setAllowFileAccessFromFileURLs(true);
+        webSettings.setAllowUniversalAccessFromFileURLs(true);
+        // 关闭内容缓存 类似于 cache-control为no-cache属性时使用
+        webSettings.setAppCacheEnabled(false);
+        webSettings.setCacheMode(WebSettings.LOAD_NO_CACHE); // 无缓存
+        // 启用自带数据库；使用内部实现的sqlite
+        webSettings.setDatabaseEnabled(false);
+        // 关闭这个，可以使用数据库，因为使用file协议它“可能“不安全，它的origin是file://而已，
+        // 虽测试发现不同app实现的webview的storage是独立的，即使都使用file协议，
+        // 目前了解到的信息是只有同一个webview，这个数据才会共享，不同的webview就无法使用了。
+        // 为了防止后续webview的实现发生改变可以共享了，换成自己实现的数据来保存
+        // indexDb好像兼容性不太好，目前还是暂使用这个方案;使用内部实现的sqlite
+        webSettings.setDomStorageEnabled(false);
+        webSettings.setUserAgentString(webSettings.getUserAgentString() + " tv_ime");
 
-            /* 3.创建像素数组,并根据BitMatrix(位矩阵)对象为数组元素赋颜色值 */
-            int[] pixels = new int[width * height];
-            for (int y = 0; y < height; y++) {
-                for (int x = 0; x < width; x++) {
-                    //bitMatrix.get(x,y)方法返回true是黑色色块，false是白色色块
-                    if (bitMatrix.get(x, y)) {
-                        pixels[y * width + x] = color_black;//黑色色块像素设置
-                    } else {
-                        pixels[y * width + x] = color_white;// 白色色块像素设置
-                    }
-                }
+        if (Build.VERSION.SDK_INT >= 26)
+            // 检查网址是否安全
+            webSettings.setSafeBrowsingEnabled(false);
+
+        if (Build.VERSION.SDK_INT >= 21)
+            // http+https是否允许
+            webSettings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+
+        // web允许执行js
+        webSettings.setJavaScriptEnabled(true);
+        webSettings.setLoadWithOverviewMode(true);
+        // 可能需要更小的字体来显示键盘文字，值范围1～72
+        webSettings.setMinimumFontSize(1);
+        webSettings.setMinimumLogicalFontSize(1);
+        // 支持 <meta name="viewport" content="width=device-width,
+        webSettings.setUseWideViewPort(true);
+
+        // 区域适应内容
+        //webView.setLayoutMode(ViewGroup.LayoutParams.WRAP_CONTENT);
+        // 把指定java方法暴露给js
+        webView.addJavascriptInterface(this, "JAVA");
+        // 一般键盘会把输入的app界面上推，如果透明时就会看到桌面背景
+        webView.setBackgroundColor(Color.TRANSPARENT);
+        WebView.setWebContentsDebuggingEnabled(true);//允许调试web
+
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onConsoleMessage(ConsoleMessage consoleMessage) {
+                Log.d("qidizi_console", String.format("%s \t%s:%d",
+                        consoleMessage.message(),
+                        consoleMessage.sourceId(),
+                        consoleMessage.lineNumber()
+                ));
+                return true;
             }
-            /* 4.创建Bitmap对象,根据像素数组设置Bitmap每个像素点的颜色值,并返回Bitmap对象 */
-            Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-            bitmap.setPixels(pixels, 0, width, 0, 0, width, height);
-            return bitmap;
-        } catch (Exception e) {
-            e.printStackTrace();
-            return null;
+        });
+
+        // 目前没有找到请求超时时间设置方法
+        webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                // 页面加载完成注入
+                webView.evaluateJavascript(String.format(
+                        "+function(){"
+                                + "let js = document.createElement('script');"
+                                + "js.src = '%s/injection.js?r=' + +new Date;"
+                                + "document.documentElement.appendChild(js);"
+                                + "}();",
+                        SoftKeyboard.get_webview_url()
+                ), null);//注入自定义方法——获取webview高度的方法
+                super.onPageFinished(view, url);
+            }
+
+        });
+        // webview内部不允许通过触摸或是物理键盘切换焦点
+        webView.setFocusable(true);
+        setContentView(webView);
+    }
+
+    private void open_url(Intent intent) {
+        String url = intent.getStringExtra("url");
+        if (null == url) return;
+
+        if (url.contains("__web__")) {
+            create_webview();
+            webView.loadUrl(String.format(
+                    "%s/webview.html?__tv__=%s&__url__=%s",
+                    SoftKeyboard.get_webview_url(),
+                    SoftKeyboard.get_lan_ipv4(),
+                    Uri.encode(url)
+            ));
+            return;
         }
+
+        play_url(url);
+    }
+
+    private void toast(String str) {
+        Toast.makeText(this, str, Toast.LENGTH_LONG).show();
+    }
+
+    private void destroy_webview() {
+        if (webView != null) {
+            // 这样处理防止有内存问题
+            // 因为本方法运行在其它线程，不能直接调用webview的方法，否则将引起
+            // java.lang.Throwable: A WebView method was called on thread 'JavaBridge'.
+            // All WebView methods must be called on the same thread
+            // 所以，把待执行方法放入它的队列
+            // 如切换到其它输入法再切回来，webview被destroy但是JsInterface并没有重置
+            webView.post(new Runnable() {
+                @Override
+                public void run() {
+                    webView.loadUrl("about:blank");
+                    webView.clearHistory();
+                    ((ViewGroup) webView.getParent()).removeView(webView);
+                    webView.destroy();
+                    webView = null;
+                }
+            });
+        }
+    }
+
+
+    @Override
+    public void onDestroy() {
+        destroy_webview();
+        super.onDestroy();
     }
 }
