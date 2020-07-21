@@ -1,60 +1,21 @@
 +function () {
-    +function () {
-        let url = location.search.match(/__url__=([^&]{10,})/);
-        if (!url) return;
-
-        url = decodeURIComponent(url[1]);
-
-        // 网页播放,跳转
-        if (url.indexOf('__web__') > -1) {
-            try {
-                location.replace(url);
-            } catch (e) {
-                toast('重定向出错:' + e);
-            }
-            return;
-        }
-
-        let player = document.getElementById('video');
-        document.getElementById('qr_box').style.display = 'none';
-        player.style.display = 'block';
-        toast(url);
-
-        player.src({
-            src: url,
-            type: 'application/x-mpegURL',
-            withCredentials: false
-        });
-    }();
-
-    +function () {
-        let ip = location.search.match(/__tv__=(\d+(?:\.\d+)+)/);
-        if (!ip) return;
-
-        new QRCode(document.getElementById("qr"), {
-            text: 'http://' + ip[1] + ':11111/',
-            width: 300,
-            height: 300,
-            colorDark: "#000000",
-            colorLight: "#ffffff",
-            correctLevel: QRCode.CorrectLevel.H
-        });
-    }();
-
     // 网页中的播放器
     +function play_web_video() {
-        if (location.search.indexOf('__url__') > -1) return;
         let video = document.getElementsByTagName('video');
-        if (!video.length) return setTimeout(play_web_video, 500);
+        if (!video.length) {
+            toast("延后"+ +new Date,1);
+            return setTimeout(play_web_video, 500);
+        }
+        toast("进入");
         video = video[0];
-        video.style.display = 'block';
-        video.style.position = 'fixed';
-        video.style.top = '0';
-        video.style.left = '0';
-        video.style.width = '100%';
-        video.style.height = '100%';
-        video.style.zIndex = 9999999;
-        video.autoplay = true;
+        // video.style.display = 'block';
+        // video.style.position = 'absolute';
+        // video.style.top = '0';
+        // video.style.left = '0';
+        // video.style.width = '100%';
+        // video.style.height = '100%';
+        // video.style.zIndex = 9999999;
+        // video.autoplay = true;
 
         try {
             video.play();

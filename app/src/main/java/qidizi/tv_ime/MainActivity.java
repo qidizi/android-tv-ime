@@ -11,6 +11,7 @@ import android.text.SpannableString;
 import android.text.style.ImageSpan;
 import android.util.Log;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.*;
@@ -37,7 +38,8 @@ import com.google.zxing.common.BitMatrix;
 import com.google.zxing.qrcode.QRCodeWriter;
 
 public class MainActivity extends AppCompatActivity {
-    private WebView webView;
+    WebView webView = null;
+    SimpleExoPlayer simpleExoPlayer = null;
 
     @Override
     protected void onNewIntent(Intent intent) {
@@ -62,10 +64,22 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void play_url(String url) {
-        SimpleExoPlayer simpleExoPlayer = new SimpleExoPlayer.Builder(this).build();
-        PlayerView playerView = new PlayerView(this);
-        playerView.setPlayer(simpleExoPlayer);
-        setContentView(playerView);
+        destroy_webview();
+
+        if (null == simpleExoPlayer) {
+            simpleExoPlayer = new SimpleExoPlayer.Builder(this).build();
+            PlayerView playerView = new PlayerView(this);
+            playerView.setPlayer(simpleExoPlayer);
+            simpleExoPlayer.setVolume(1);
+            simpleExoPlayer.addListener(new Player.EventListener() {
+                @Override
+                public void onPlayerError(@NonNull ExoPlaybackException error) {
+                    toast("视频加载失败:\n" + error.getMessage());
+                }
+            });
+            simpleExoPlayer.setRepeatMode(Player.REPEAT_MODE_OFF);
+            setContentView(playerView);
+        }
 
         DataSource.Factory dataSourceFactory = new DefaultDataSourceFactory(this,
                 Util.getUserAgent(this, getResources().getString(R.string.app_name)));
@@ -104,14 +118,8 @@ public class MainActivity extends AppCompatActivity {
         }
 
         simpleExoPlayer.prepare(videoSource);
-        simpleExoPlayer.setVolume(1);
+        // 自动播放
         simpleExoPlayer.setPlayWhenReady(true);
-        simpleExoPlayer.addListener(new Player.EventListener() {
-            @Override
-            public void onPlayerError(@NonNull ExoPlaybackException error) {
-                toast("视频加载失败:\n" + error.getMessage());
-            }
-        });
     }
 
     private void create_qr() {
@@ -159,10 +167,40 @@ public class MainActivity extends AppCompatActivity {
         // 界面可见时,开始定时刷新2维码
     }
 
+    @Override
+    public boolean onKeyUp(int keyCode, KeyEvent event) {
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_DPAD_CENTER:
+                // 正在播放就暂停
+                player_toggle_pause();
+                break;
+            case KeyEvent.KEYCODE_DPAD_LEFT:
+                // 快退
+                player_seek(-1);
+                break;
+            case KeyEvent.KEYCODE_DPAD_RIGHT:
+                // 快进
+                player_seek(1);
+                break;
+        }
+        return super.onKeyUp(keyCode, event);
+    }
+
+    private void player_toggle_pause() {
+        if (null == simpleExoPlayer) return;
+        simpleExoPlayer.setPlayWhenReady(!simpleExoPlayer.getPlayWhenReady());
+    }
+
+    private void player_seek(int how) {
+        if (null == simpleExoPlayer || !(simpleExoPlayer.getDuration() > 1000 * 60 * 3)) return;
+
+        simpleExoPlayer.seekTo(simpleExoPlayer.getCurrentPosition() + how * 1000 * 60);
+    }
+
     @SuppressLint({"SetJavaScriptEnabled", "JavascriptInterface", "AddJavascriptInterface"})
-    private void create_webview() {
+    private void create_webview(String url) {
         // 防止重复创建，以内存换html启动时间
-        if (null != webView) return;
+        destroy_player();
         webView = new WebView(this);
         WebSettings webSettings = webView.getSettings();
         // 允许file协议的文件通过js的xhr能力访问其它协议的文件，不受跨域策略限制；注意非js访问方式无效；
@@ -201,9 +239,9 @@ public class MainActivity extends AppCompatActivity {
         // 区域适应内容
         //webView.setLayoutMode(ViewGroup.LayoutParams.WRAP_CONTENT);
         // 把指定java方法暴露给js
-        webView.addJavascriptInterface(this, "JAVA");
+        // webView.addJavascriptInterface(this, "JAVA");
         // 一般键盘会把输入的app界面上推，如果透明时就会看到桌面背景
-        webView.setBackgroundColor(Color.TRANSPARENT);
+        // webView.setBackgroundColor(Color.TRANSPARENT);
         WebView.setWebContentsDebuggingEnabled(true);//允许调试web
 
         webView.setWebChromeClient(new WebChromeClient() {
@@ -237,6 +275,7 @@ public class MainActivity extends AppCompatActivity {
         });
         // webview内部不允许通过触摸或是物理键盘切换焦点
         webView.setFocusable(true);
+        webView.loadUrl(url);
         setContentView(webView);
     }
 
@@ -245,13 +284,7 @@ public class MainActivity extends AppCompatActivity {
         if (null == url) return;
 
         if (url.contains("__web__")) {
-            create_webview();
-            webView.loadUrl(String.format(
-                    "%s/webview.html?__tv__=%s&__url__=%s",
-                    SoftKeyboard.get_webview_url(),
-                    SoftKeyboard.get_lan_ipv4(),
-                    Uri.encode(url)
-            ));
+            create_webview(url);
             return;
         }
 
@@ -262,31 +295,38 @@ public class MainActivity extends AppCompatActivity {
         Toast.makeText(this, str, Toast.LENGTH_LONG).show();
     }
 
-    private void destroy_webview() {
-        if (webView != null) {
-            // 这样处理防止有内存问题
-            // 因为本方法运行在其它线程，不能直接调用webview的方法，否则将引起
-            // java.lang.Throwable: A WebView method was called on thread 'JavaBridge'.
-            // All WebView methods must be called on the same thread
-            // 所以，把待执行方法放入它的队列
-            // 如切换到其它输入法再切回来，webview被destroy但是JsInterface并没有重置
-            webView.post(new Runnable() {
-                @Override
-                public void run() {
-                    webView.loadUrl("about:blank");
-                    webView.clearHistory();
-                    ((ViewGroup) webView.getParent()).removeView(webView);
-                    webView.destroy();
-                    webView = null;
-                }
-            });
-        }
+    private void destroy_player() {
+        if (simpleExoPlayer == null) return;
+        simpleExoPlayer.release();
+        simpleExoPlayer = null;
     }
 
 
+    private void destroy_webview() {
+        if (webView == null) return;
+
+        // 这样处理防止有内存问题
+        // 因为本方法运行在其它线程，不能直接调用webview的方法，否则将引起
+        // java.lang.Throwable: A WebView method was called on thread 'JavaBridge'.
+        // All WebView methods must be called on the same thread
+        // 所以，把待执行方法放入它的队列
+        // 如切换到其它输入法再切回来，webview被destroy但是JsInterface并没有重置
+        webView.post(new Runnable() {
+            @Override
+            public void run() {
+                webView.loadUrl("about:blank");
+                webView.clearHistory();
+                //((ViewGroup) webView.getParent()).removeView(webView);
+                webView.destroy();
+                webView = null;
+            }
+        });
+    }
+
     @Override
     public void onDestroy() {
-        destroy_webview();
         super.onDestroy();
+        destroy_webview();
+        destroy_player();
     }
 }

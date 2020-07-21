@@ -112,7 +112,7 @@
                     url += '&ext=m3u8';
                 } else if (0 === url.toLowerCase().indexOf('rtmp')) {
                     url += '&ext=rtmp';
-                } else if (url.toLowerCase().indexOf('__web__') < 0) {
+                } else if (url.toLowerCase().indexOf('__web__') < 0 && url.toLowerCase().indexOf('ext=') < 0) {
                     // 如果不是网页
                     this.toast = '无法确定后缀名';
                     return;
