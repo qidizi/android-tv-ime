@@ -9,7 +9,7 @@ android {
         applicationId "qidizi.tv_ime"
         // 19 是4.4
         minSdkVersion 19
-        targetSdkVersion 27
+        targetSdkVersion 29
         versionCode 1
         versionName "1.0"
     }
@@ -71,7 +71,6 @@ dependencies {
 
     implementation 'com.google.android.exoplayer:exoplayer:2.11.7'
     implementation 'com.google.android.exoplayer:extension-rtmp:2.11.7'
-
 
     /*显示2维码,3.4需要java 8*/
      implementation 'com.google.zxing:core:3.4.0'

@@ -16,31 +16,35 @@
 
 package qidizi.tv_ime;
 
+import android.content.Context;
 import android.content.Intent;
+import android.graphics.Color;
 import android.inputmethodservice.InputMethodService;
 import android.net.Uri;
+import android.net.UrlQuerySanitizer;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
+import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.ViewGroup;
 import android.view.inputmethod.InputConnection;
+import android.widget.TextView;
 import android.widget.Toast;
 import androidx.core.content.FileProvider;
-import org.json.JSONObject;
 
-import java.io.DataInputStream;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.*;
-import java.nio.charset.StandardCharsets;
 import java.util.Enumeration;
 
 public class SoftKeyboard extends InputMethodService {
     final static int PORT = 11111;
     public volatile boolean httpd_running = false;
     private String apk_path;
-    private boolean msg_i = false;
     final static String HOST_LOCAL = "php.local.qidizi.com";
     // avd网关(开发电脑)
     final static String HOST_DEV = "10.0.2.2";
@@ -69,234 +73,196 @@ public class SoftKeyboard extends InputMethodService {
 
     private void create_httpd() {
         if (httpd_running) return;
+        final SoftKeyboard me = this;
         httpd_running = true;
-        Thread thread = new Thread() {
+        new Thread(new Runnable() {
             @Override
             public void run() {
                 ServerSocket httpd;
                 try {
                     // 使用端口转发功能,把虚拟机avd端口转发到开发机的11111上,就可以使用 http://127.0.0.1:11111 来访问
                     // android/platform-tools/adb forward tcp:11111 tcp:11111
-                    httpd = new ServerSocket(PORT);
+                    httpd = new ServerSocket(PORT, 1);
+                    httpd.setReuseAddress(false);
+                    Log.d("qidizi_debug", "httpd 启动成功 " + httpd.isBound());
                 } catch (Exception e) {
-                    toast("电视端启动失败:" + e.getMessage());
-                    return;
-                }
-
-                if (!httpd.isBound()) {
-                    //  todo 需要考虑如何再次尝试启动
+                    e.printStackTrace();
+                    toast("电视端启动失败:" + e.getMessage(), me);
                     httpd_running = false;
                     return;
                 }
 
-                toast("请打开【" + getResources().getString(R.string.app_name) + "】应用扫码控制电视");
-                //noinspection InfiniteLoopStatement
-                while (true) httpd_accept(httpd);
+                toast("电视IP " + get_lan_ipv4(), me);
+                //noinspection
+                while (true) accept(httpd);
             }
-        };
-        thread.start();
+        }).start();
     }
 
-    private void httpd_accept(ServerSocket httpd) {
+    private void accept(ServerSocket httpd) {
         try (
                 Socket client = httpd.accept();
-                DataInputStream input = new DataInputStream(client.getInputStream())
+                InputStream is = client.getInputStream()
         ) {
-            JSONObject response = new JSONObject();
-            response.put("code", 200);
-            response.put("msg", "已处理");
             try {
-                // GET HEAD POST OPTIONS PUT DELETE TRACE CONNECT
-                // 不能设置太大,防止取到body数据
-                byte[] bytes = new byte[20];
-//                //不能用,有时可能过慢导致
-//                if (input.available() < 1)
-//                    throw new Exception("httpd.accept数据不可用");
+                client.setSoTimeout(1000 * 5);
+                // get 支持的长度
+                byte[] bytes = new byte[1024];
+                int len = is.read(bytes);
+                if (-1 == len)
+                    throw new Exception("http报文读取异常");
 
-                if (input.read(bytes) < 1)
-                    throw new Exception("httpd.accept读取首行失败");
+                // 找到 rn rn标志
+                int rn_rn = 0, i = 0;
 
-                // 先快速读出部分
-                boolean is_file;
-                String method = new String(bytes).toLowerCase();
+                do {
+                    if (13 == bytes[i] || 10 == bytes[i])
+                        rn_rn++;
+                    else
+                        rn_rn = 0;
 
-                if (method.startsWith("get /")) {
-                    // 请求首页
-                    String body = String.format(
-                            "<script src='%s/html.js?r=%d'></script>",
-                            get_client_url(), System.currentTimeMillis()
-                    );
-                    client.getOutputStream().write((
-                            "HTTP/1.1 200 OK\r\n"
-                                    + "Content-Type: text/html;charset=UTF-8\r\n"
-                                    + "Access-Control-Allow-Origin: *\r\n"
-                                    + "Access-Control-Allow-Headers: *\r\n"
-                                    + "Connection: keep-alive\r\n"
-                                    + "Content-Length: " + body_length(body) + "\r\n"
-                                    + "\r\n"
-                                    + body
-                    ).getBytes());
-                    response = null;
-                    return;
-                } else if (method.startsWith("post /?file=1&")) {
-                    is_file = true;
-                } else if (method.startsWith("post /")) {
-                    is_file = false;
-                } else if (method.startsWith("options ")) {
-                    // 浏览器查询是否支持某些方法,或是否允许跨域
-                    client.getOutputStream().write((
-                            "HTTP/1.1 204 No Content\r\n" +
-                                    // 表示支持方法
-                                    "Allow: GET, POST, OPTIONS\r\n" +
-                                    // 允许跨域
-                                    "Access-Control-Allow-Origin: *\r\n" +
-                                    "Access-Control-Allow-Methods: *\r\n" +
-                                    "Access-Control-Allow-Headers: *\r\n" +
-                                    "Connection: keep-alive\r\n" +
-                                    "Content-Length: 0\r\n" +
-                                    "\r\n"
-                    ).getBytes());
-                    response = null;
-                    return;
-                } else {
-                    // 其它方法不支持; 暂不确定响应头就这样是否就ok
-                    client.getOutputStream().write((
-                            "HTTP/1.1 405 Method Not Allowed\r\n" +
-                                    "Content-Length: 0\r\n" +
-                                    "Connection: keep-alive\r\n" +
-                                    "\r\n"
-                    ).getBytes());
-                    response = null;
-                    return;
-                }
-
-                if (input.available() < 1)
-                    throw new Exception("httpd.accept非法http的request headers");
-
-                int mark;
-                // \r == 13 \n === 10
-                int rn_rn = 0;
-                // 消耗到 \r\n\r\n;就可以只取body了
-                while (input.available() > 0 && (mark = input.read()) != -1) {
-                    if (13 == mark) {
-                        // \r
-                        if (0 == rn_rn) {
-                            rn_rn = 1;
-                            continue;
-                        }
-
-                        if (11 == rn_rn) {
-                            rn_rn = 111;
-                            continue;
-                        }
-                    } else if (10 == mark) {
-                        // \n
-                        if (1 == rn_rn) {
-                            rn_rn = 11;
-                            continue;
-                        }
-
-                        if (111 == rn_rn) {
-                            // 找到\r\n\r\n
-                            rn_rn = 1111;
-                            break;
-                        }
+                    if (4 == rn_rn) {
+                        // 把游标移到到body首个byte
+                        i++;
+                        break;
                     }
-                    // 重置
-                    rn_rn = 0;
+                } while (i++ < len);
+
+                if (0 == rn_rn)
+                    throw new Exception("http报文缺失\\r\\n\\r\\n");
+                int body_index = len - i;
+                // 取header
+                String str = new String(bytes, 0, i);
+
+                if (str.startsWith("OPTIONS "))
+                    // 获取是否允许跨域
+                    throw new Exception("允许跨域");
+
+                if (!str.startsWith("POST /?"))
+                    throw new Exception("此操作未实现");
+
+                UrlQuerySanitizer urlQuerySanitizer = new UrlQuerySanitizer();
+                urlQuerySanitizer.setAllowUnregisteredParamaters(true);// 支持_划线
+                urlQuerySanitizer.parseQuery(str.substring(str.indexOf("?") + 1, str.indexOf(" HTTP/")));
+                str = "";
+                String action = urlQuerySanitizer.getValue("_do");
+
+                if (null == urlQuerySanitizer.getValue("_size"))
+                    throw new Exception("queryString必须提供body大小参数_size");
+
+                if (null == action)
+                    throw new Exception("queryString必须提供操作参数_do");
+                int body_size = Integer.parseInt(urlQuerySanitizer.getValue("_size"));
+
+                if (body_size > 0) {
+                    byte[] body = new byte[body_size];
+                    // 复制多读出的 body
+                    System.arraycopy(bytes, i, body, 0, body_index);
+                    body_size -= body_index;
+                    //noinspection UnusedAssignment
+                    bytes = null;
+
+                    if (body_size > 0) {
+                        bytes = new byte[100];
+                        // 只有没有读全时才需要继续读取
+                        while (body_size > 0 && -1 != (len = is.read(bytes))) {
+                            System.arraycopy(bytes, 0, body, body_index, len);
+                            body_size -= len;
+                            body_index += len;
+                        }
+
+                        //noinspection UnusedAssignment
+                        bytes = null;
+                    }
+
+                    if ("send_file".equals(action)) {
+                        install_apk(body);
+                        httpd_response(client.getOutputStream(), "请按屏幕提示安装!");
+                        return;
+                    }
+
+                    // 这个逻辑,可能属于重复 byte 转 str
+                    str = new String(body);
+                    //noinspection UnusedAssignment
+                    body = null;
                 }
-                // 消耗掉head头,剩下的就是body了
 
-                if (1111 != rn_rn)
-                    throw new Exception("http请求报文缺失\\r\\n\\r\\n");
-
-
-                if (is_file) {
-                    // 上传文件
-                    install_apk(input);
-                    response.put("msg", get_msg("已上传,请注意根据屏幕提示操作"));
-                    return;
-                }
-
-                if (input.available() < 1)
-                    throw new Exception("httpd.accept非法http的request body为空");
-
-                // 最多支持*k数据
-                bytes = new byte[input.available()];
-                input.readFully(bytes);
-                String body = new String(bytes, StandardCharsets.UTF_8);
-                // post json
-                JSONObject obj = new JSONObject(body);
-                if (!obj.has("action")) throw new Exception("post的json.action缺失");
-
-                switch (obj.getString("action")) {
+                switch (action) {
                     case "send_text":
                         // 文字上屏
-                        if (!obj.has("text")) throw new Exception("send_text 的 json.text 缺失");
-                        send_text(obj.getString("text"));
-                        response.put("msg", get_msg("已发送"));
+                        send_text(str);
+                        httpd_response(client.getOutputStream(), "文字已发送");
                         break;
                     case "send_key":
                         // 发送按键事件
-                        if (!obj.has("key")) throw new Exception("send_key 的 json.key 缺失");
-                        send_key(obj.getString("key"));
-                        response.put("msg", get_msg("已发送"));
+                        send_key(str);
+                        httpd_response(client.getOutputStream(), "按键已发送");
                         break;
-                    case "play_url":
+                    case "send_url":
                         // 播放远程视频
-                        if (!obj.has("url")) throw new Exception("play_url 的 json.url 缺失");
-                        play_url(obj.getString("url"));
-                        response.put("msg", get_msg("已请求"));
+                        play_url(str, urlQuerySanitizer.getValue("seek"));
+                        httpd_response(client.getOutputStream(), "操作已完成");
                         break;
                     default:
-                        throw new Exception(obj.getString("action") + " action不支持");
+                        throw new Exception("该操作未实现");
                 }
             } catch (Exception e) {
-                response.put("code", 500);
-                response.put("msg", e.getMessage());
-            } finally {
-                if (response != null) {
-                    String body = response.toString();
-                    client.getOutputStream().write((
-                            "HTTP/1.1 200 OK\r\n"
-                                    + "Content-Type: application/json;charset=utf-8\r\n"
-                                    + "Access-Control-Allow-Origin: *\r\n"
-                                    + "Access-Control-Allow-Headers: *\r\n"
-                                    + "Content-Length: " + body_length(body) + "\r\n"
-                                    + "Connection: keep-alive\r\n"
-                                    + "\r\n"
-                                    + body
-                    ).getBytes());
-                }
+                e.printStackTrace();
+                httpd_response(client.getOutputStream(), e.getMessage());
             }
         } catch (Exception e) {
-            toast("处理客户端请求失败:" + e.getMessage());
+            toast("建立socket失败:" + e.getMessage(), this);
+            e.printStackTrace();
         }
     }
 
-    private int body_length(String body) {
-        return body.getBytes().length;
+    private void install_apk(byte[] body) throws Exception {
+        // 上传文件
+        File file = new File(apk_path);
+
+        try (OutputStream out = new FileOutputStream(file)) {
+            out.write(body);
+            //noinspection UnusedAssignment
+            body = null;
+            out.flush();
+        } catch (Exception e) {
+            throw new Exception("保存失败:" + e.getMessage());
+        }
+
+        Intent intent = new Intent(Intent.ACTION_VIEW);
+        Uri apkUri;
+        // 这个要放到前面,防止替换掉 intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            // 注意当前通过 file_paths.xml 授权cache目录下可分享,所以file必须属于该目录下文件
+            apkUri = FileProvider.getUriForFile(this, "qidizi.tv_ime.provider", file);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } else {
+            apkUri = Uri.fromFile(file);
+        }
+        intent.setDataAndType(apkUri, "application/vnd.android.package-archive");
+        startActivity(intent);
     }
 
-//    /**
-//     * onStartInputView方法 输入视图正在显示并且编辑框输入已经开始的时候回调该方法，
-//     * onStartInputView方法总会在onStartInput方法之后被调用，普通的设置可以在onStartInput方法中进行，
-//     * 在onStartInputView方法中进行视图相关的设置，开发者应该保证onCreateInputView方法在该方法被调用之前调用。
-//     *
-//     * @param info       输入框的信息
-//     * @param restarting 是否重新启动
-//     */
-//    @Override
-//    public void onStartInputView(EditorInfo info, boolean restarting) {
-//        super.onStartInputView(info, restarting);
-//    }
+    private void httpd_response(OutputStream os, String body) {
+        try {
+            if (null == body) body = "不明错误";
+            os.write((
+                    "HTTP/1.1 200 OK\r\n"
+                            + "Allow: PUT, GET, POST, OPTIONS\r\n"
+                            + "Content-Type: text/html;charset=utf-8\r\n"
+                            + "Access-Control-Allow-Origin: *\r\n"
+                            + "Access-Control-Allow-Headers: *\r\n"
+                            + "Content-Length: " + body.getBytes().length + "\r\n"
+                            + "\r\n"
+                            + body
+            ).getBytes());
+        } catch (Exception e) {
+            toast("应答失败:" + e.getMessage(), this);
+        }
+    }
 
     private void destroy_httpd() {
-    }
-
-    private String get_msg(String txt) {
-        msg_i = !msg_i;
-        return txt + "<sup>" + (msg_i ? 1 : 0) + "</sup>";
     }
 
     @Override
@@ -334,23 +300,38 @@ public class SoftKeyboard extends InputMethodService {
                     // 用adb shell 的input keyevent 和 Instrumentation.sendKeyDownUpSync需要root权限
                     // 用输入法方式,需要建立 getCurrentInputConnection 才行;
                 } catch (Exception e) {
-                    toast("模拟按钮失败:" + e.getMessage());
+                    toast("模拟按钮失败:" + e.getMessage(), me);
                 }
             }
         });
     }
 
-    void toast(final String msg) {
-        final SoftKeyboard me = this;
-        new Handler(Looper.getMainLooper()).post(new Runnable() {
+    static void toast(final String msg, final Context context) {
+        new Thread(new Runnable() {
             @Override
             public void run() {
-                Toast.makeText(
-                        me, msg,
-                        Toast.LENGTH_LONG
-                ).show();
+                Looper.prepare();
+                // new Toast(context) 出来的实例时间不爱控制
+                Toast toast = Toast.makeText(context, msg, Toast.LENGTH_LONG);
+                try {
+                    ViewGroup group = (ViewGroup) toast.getView();
+                    TextView text = (TextView) group.getChildAt(0);
+                    text.setTextSize(30);
+                    text.setSingleLine(false);
+                    text.setMaxWidth(99999);
+                    text.setPadding(5, 5, 5, 5);
+                    // 因为只能设置长与短,其它时间需要自己维护,比如使用定时器来显示
+                    toast.setGravity(Gravity.CENTER, 0, 0);
+                    text.setTextColor(Color.WHITE);
+                    text.setBackgroundColor(Color.BLACK);
+                } catch (Exception e) {
+                    toast.setText(e.getMessage());
+                }
+
+                toast.show();
+                Looper.loop();
             }
-        });
+        }).start();
     }
 
     private void send_text(final String text) {
@@ -361,7 +342,7 @@ public class SoftKeyboard extends InputMethodService {
                 // 发送的是字符串，非android支持的KEYCODE
                 InputConnection ic = me.getCurrentInputConnection();
                 if (ic == null) {
-                    toast("无输入框");
+                    toast("无输入框", me);
                     return;
                 }
                 // 先删除整个输入框内容
@@ -372,47 +353,14 @@ public class SoftKeyboard extends InputMethodService {
         });
     }
 
-    private void play_url(final String url) {
+    private void play_url(final String url, String seek) {
         final SoftKeyboard me = this;
         Intent intent = new Intent(me, MainActivity.class);
         intent.putExtra("url", url);
+        intent.putExtra("seek", seek);
         // 在当前堆中,只能有一个
         intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         me.startActivity(intent);
-    }
-
-
-    private void install_apk(DataInputStream input) throws Exception {
-        File file = new File(apk_path);
-        OutputStream out = new FileOutputStream(file);
-        int byte_len = 1024;
-        byte[] bytes = new byte[byte_len];
-        int len;
-
-        while ((len = input.read(bytes)) > -1) {
-            out.write(bytes, 0, len);
-
-            // 读完
-            if (len < byte_len)
-                break;
-        }
-
-        out.flush();
-        out.close();
-        toast("上传成功,准备安装...");
-        Intent intent = new Intent(Intent.ACTION_VIEW);
-        Uri apkUri;
-        // 这个要放到前面,防止替换掉 intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            // 注意当前通过 file_paths.xml 授权cache目录下可分享,所以file必须属于该目录下文件
-            apkUri = FileProvider.getUriForFile(this, "qidizi.tv_ime.provider", file);
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        } else {
-            apkUri = Uri.fromFile(file);
-        }
-        intent.setDataAndType(apkUri, "application/vnd.android.package-archive");
-        startActivity(intent);
     }
 
     static String get_client_url() {
@@ -429,7 +377,10 @@ public class SoftKeyboard extends InputMethodService {
         );
     }
 
-     static String get_lan_ipv4() {
+    static String get_lan_ipv4() {
+        if (is_android_avd())
+            return "127.0.0.1";
+
         try {
             for (Enumeration<NetworkInterface> en = NetworkInterface
                     .getNetworkInterfaces(); en.hasMoreElements(); ) {

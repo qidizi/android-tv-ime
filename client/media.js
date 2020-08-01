@@ -1,5 +1,5 @@
 +function show_media() {
-    if (!window['app']) {
+    if (!window['app'] || !app.set_media_list) {
         setTimeout(show_media, 1);
         return;
     }
