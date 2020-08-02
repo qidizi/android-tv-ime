@@ -32,15 +32,23 @@
             },
             set_media_list(str) {
                 let tmp = [];
-                str.split('\n').forEach(function (v) {
+                let unique = {};
+                // 把多行编写的url合并成一行(多个源)
+                str.replace(/[\n\r]+\s*(\w+:\/+)/gm, " $1").split('\n')
+                    .sort(function (a, b) {
+                        return String(a).localeCompare(String(b));
+                    }).forEach(function (v) {
                     v = v.trim();
                     if (!v) return;
-                    let url = '';
-                    v = v.replace(/\w+:\/+.+\r*$/g, function ($0) {
-                        url = $0;
+                    let urls = [];
+                    v = v.replace(/\w+:\/+[^\s]+/g, function ($0) {
+                        // 排重
+                        if (unique[$0]) return console.log('重复的视频列表:\n' + $0);
+                        unique[$0] = 1;
+                        urls.push($0);
                         return '';
                     });
-                    tmp.push([v.trim(), url]);
+                    tmp.push([v.trim(), urls]);
                 });
                 this.media_list = tmp;
             },

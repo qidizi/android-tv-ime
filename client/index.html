@@ -53,11 +53,14 @@
         <input type="file" id="file_input" class="file_input"/>
     </div>
     <input type="submit" class="btn_right" @click="upload" value="上传应用"/>
-    <input v-model.trim="filter" class="filter" placeholder="输入关键字快速查找">
+    <input v-model.trim="filter" class="filter" onclick="this.select();" placeholder="输入关键字快速查找">
     <ol class="media_list">
-        <template v-for="nu in media_list">
-            <li class="url" v-if="!filter || nu[0].toLowerCase().indexOf(filter.toLowerCase()) > -1">
-                <a href="javascript:void(0)" v-html="nu[0]" @click="play_url(nu[1])" :title="nu[1]"> </a>
+        <template v-for="media in media_list">
+            <li class="url" v-if="!filter || media[0].toLowerCase().indexOf(filter.toLowerCase()) > -1">
+                <strong v-html="media[0]" class="source_name"></strong>
+                <template v-for="(url,index) in media[1]">
+                    <a href="javascript:void(0)" @click="play_url(url)" class="source">源{{index + 1}}</a>
+                </template>
             </li>
         </template>
     </ol>
@@ -67,7 +70,7 @@
     </div>
 </div>
 <script src="index.js?202008011449" type="text/javascript" async></script>
-<script src="http://www-public.qidizi.com/android-tv-ime/client/media.js?r=202008011449" type="text/javascript"
+<script src="media.js?r=202008011449" type="text/javascript"
         async></script>
 </body>
 </html>
