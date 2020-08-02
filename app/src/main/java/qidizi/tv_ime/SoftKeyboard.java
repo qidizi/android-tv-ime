@@ -83,7 +83,7 @@ public class SoftKeyboard extends InputMethodService {
                     // 使用端口转发功能,把虚拟机avd端口转发到开发机的11111上,就可以使用 http://127.0.0.1:11111 来访问
                     // android/platform-tools/adb forward tcp:11111 tcp:11111
                     httpd = new ServerSocket(PORT, 1);
-                    httpd.setReuseAddress(false);
+                    httpd.setReuseAddress(true);
                     Log.d("qidizi_debug", "httpd 启动成功 " + httpd.isBound());
                 } catch (Exception e) {
                     e.printStackTrace();
@@ -133,6 +133,7 @@ public class SoftKeyboard extends InputMethodService {
                 int body_index = len - i;
                 // 取header
                 String str = new String(bytes, 0, i);
+               // toast(str, this);
 
                 if (str.startsWith("OPTIONS "))
                     // 获取是否允许跨域
@@ -312,18 +313,19 @@ public class SoftKeyboard extends InputMethodService {
             public void run() {
                 Looper.prepare();
                 // new Toast(context) 出来的实例时间不爱控制
-                Toast toast = Toast.makeText(context, msg, Toast.LENGTH_LONG);
+                Toast toast = Toast.makeText(context, "", Toast.LENGTH_LONG);
                 try {
-                    ViewGroup group = (ViewGroup) toast.getView();
-                    TextView text = (TextView) group.getChildAt(0);
+                    TextView text = new TextView(context);
                     text.setTextSize(30);
-                    text.setSingleLine(false);
-                    text.setMaxWidth(99999);
-                    text.setPadding(5, 5, 5, 5);
                     // 因为只能设置长与短,其它时间需要自己维护,比如使用定时器来显示
                     toast.setGravity(Gravity.CENTER, 0, 0);
-                    text.setTextColor(Color.WHITE);
-                    text.setBackgroundColor(Color.BLACK);
+                    // 坚果 m6 android 7 系统,无效果
+                    text.setSingleLine(false);
+                    text.setTextColor(Color.RED);
+                    text.setBackgroundColor(Color.WHITE);
+                    toast.setMargin(0, 0);
+                    text.setText(msg);
+                    toast.setView(text);
                 } catch (Exception e) {
                     toast.setText(e.getMessage());
                 }

@@ -18,6 +18,7 @@ import com.google.android.exoplayer2.ExoPlaybackException;
 import com.google.android.exoplayer2.Player;
 import com.google.android.exoplayer2.SimpleExoPlayer;
 import com.google.android.exoplayer2.ext.rtmp.RtmpDataSourceFactory;
+import com.google.android.exoplayer2.source.BehindLiveWindowException;
 import com.google.android.exoplayer2.source.MediaSource;
 import com.google.android.exoplayer2.source.ProgressiveMediaSource;
 import com.google.android.exoplayer2.source.dash.DashMediaSource;
@@ -47,7 +48,8 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         // 唤醒httpd服务
         Intent intent = new Intent(this, SoftKeyboard.class);
-        Log.d("qidizi_debug", "激活httpd" + (startService(intent) == null ? "失败" : "成功"));
+        startService(intent);
+        Log.d("qidizi_debug", "唤醒 SoftKeyboard 服务");
         String url = getIntent().getStringExtra("url");
 
         if (null == url) {
@@ -94,7 +96,61 @@ public class MainActivity extends AppCompatActivity {
             simpleExoPlayer.addListener(new Player.EventListener() {
                 @Override
                 public void onPlayerError(@NonNull ExoPlaybackException error) {
-                    SoftKeyboard.toast(error.getMessage(), me);
+                    // 当前 2.11.7 版本还是没有解决 缓存慢导致停止播放问题
+                    // 出错时,只得到这个信息 com.google.android.exoplayer2.source.BehindLiveWindowException
+                    // 见 这个说明 https://medium.com/google-exoplayer/load-error-handling-in-exoplayer-488ab6908137
+                    // 见 https://exoplayer.dev/hls.html 中 BehindLiveWindowException
+                    if (isBehindLiveWindow(error)) {
+                        // Re-initialize player at the live edge.
+                        Log.d("qidizi_debug", "出现 BehindLiveWindowException 错误,重试");
+                        SoftKeyboard.toast("噢,要缓冲了,请稍候或换源...[1]", me);
+                        simpleExoPlayer.retry();
+                        return;
+                    }
+
+                    error.printStackTrace();
+                    String msg;
+                    switch (error.type) {
+                        case ExoPlaybackException.TYPE_OUT_OF_MEMORY:
+                            msg = "内存不足";
+                            break;
+                        case ExoPlaybackException.TYPE_REMOTE:
+                            msg = "远程组件异常";
+                            break;
+                        case ExoPlaybackException.TYPE_RENDERER:
+                            msg = "视频渲染异常";
+                            break;
+                        case ExoPlaybackException.TYPE_SOURCE:
+                            msg = "视频源异常";
+                            break;
+                        case ExoPlaybackException.TYPE_UNEXPECTED:
+                            msg = "运行时异常";
+                            break;
+                        default:
+                            msg = "未明异常";
+                            break;
+                    }
+
+                    // 出错信息不要类名
+                    msg += ":";
+                    msg += null == error.getCause() || null == error.getCause().getMessage() ?
+                            error.getMessage() : error.getCause().getMessage();
+                    SoftKeyboard.toast(msg, me);
+                    Log.d("qidizi_debug", msg);
+                }
+
+                private boolean isBehindLiveWindow(ExoPlaybackException e) {
+                    if (e.type != ExoPlaybackException.TYPE_SOURCE) {
+                        return false;
+                    }
+                    Throwable cause = e.getSourceException();
+                    while (cause != null) {
+                        if (cause instanceof BehindLiveWindowException) {
+                            return true;
+                        }
+                        cause = cause.getCause();
+                    }
+                    return false;
                 }
             });
             simpleExoPlayer.setRepeatMode(Player.REPEAT_MODE_OFF);
@@ -146,6 +202,7 @@ public class MainActivity extends AppCompatActivity {
         simpleExoPlayer.setPlayWhenReady(true);
         if (seek > 0)
             simpleExoPlayer.seekTo(seek);
+        SoftKeyboard.toast("加载:" + url, this);
     }
 
     private void create_qr() {
