@@ -53,6 +53,11 @@
         <input type="file" id="file_input" class="file_input"/>
     </div>
     <input type="submit" class="btn_right" @click="upload" value="上传应用"/>
+
+    <div class="list_btn">
+        <a href="javascript:void(0);" @click="media_list_tmp_append()">追加视频</a>
+        <a href="javascript:void(0);" @click="media_list_tmp_share()">分享视频</a>
+    </div>
     <input v-model.trim="filter" class="filter" onclick="this.select();" placeholder="输入关键字快速查找">
     <ol class="media_list">
         <template v-for="media in media_list">
@@ -63,10 +68,24 @@
                 </template>
             </li>
         </template>
+
+        <template v-for="(media,index) in media_list_tmp">
+            <li class="url" v-if="!filter || media[0].toLowerCase().indexOf(filter.toLowerCase()) > -1">
+                <strong v-html="media[0]" class="source_name"></strong>
+                <a href="javascript:void(0)" @click="play_url(media[1])" class="source">播放</a>
+                <a href="javascript:void(0)" @click="media_list_tmp_del(index)" class="source">删除</a>
+            </li>
+        </template>
     </ol>
     <i class="to_top" onclick="window.scrollTo(0, 0);">顶部</i>
     <div class="mask" :style="mask_on ? '': 'display:none'">
         <div class="loader"><p></p></div>
+    </div>
+    <div class="prompt" v-if="prompt">
+        <div class="title" v-html="prompt_title"></div>
+        <textarea v-model="prompt_data" :placeholder="prompt_tip" class="data"></textarea>
+        <button @click="prompt = false;" class="cancel">关闭</button>
+        <button @click="prompt_ok()" class="ok" v-if="prompt_ok_show">确定</button>
     </div>
 </div>
 <script src="index.js?202008011449" type="text/javascript" async></script>
