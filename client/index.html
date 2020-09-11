@@ -86,13 +86,11 @@
     </div>
     <div class="prompt" v-if="prompt">
         <div class="title" v-html="prompt_title"></div>
-        <textarea v-model="prompt_data" :placeholder="prompt_tip" class="data"></textarea>
+        <textarea v-model="prompt_data" :placeholder="prompt_tip" class="data" onclick="this.select();"></textarea>
         <button @click="prompt = false;" class="cancel">关闭</button>
         <button @click="prompt_ok()" class="ok" v-if="prompt_ok_show">确定</button>
     </div>
 </div>
-<script src="index.js?202008091449" type="text/javascript" async></script>
-<script src="media.js?r=202008091449" type="text/javascript"
-        async></script>
+<script src="index.js?202009111449" type="text/javascript" async></script>
 </body>
 </html>

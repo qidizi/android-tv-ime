@@ -26,11 +26,21 @@
             prompt_ok_cb: null,
         },
         watch: {},
+        created() {
+            this.clean_cache();
+        },
         mounted() {
             this.tv = this.get_param('tv', '').trim();
             this.media_list_tmp_show();
         },
         methods: {
+            clean_cache() {
+                let now = +new Date;
+                if (now - (+this.get_param('_t', 0) || 0) > 1000 * 60 * 60) {
+                    let url = location.href.replace(/&*_t=[^=&]*/gi, '');
+                    location.href = url + (url.indexOf('?') > -1 ? '&' : '?') + '_t=' + now;
+                }
+            },
             prompt_ok() {
                 if (!this.prompt_ok_cb) return;
                 this.prompt_ok_cb();
@@ -236,7 +246,8 @@
                         url += ext;
                     }
                 }
-                this.xhr('send_url', url, 'seek=' + +this.media_start || 0);
+                let query = +this.media_start > 0 ? 'seek=' + +this.media_start : '';
+                this.xhr('send_url', url, query);
             }
         }
     });
