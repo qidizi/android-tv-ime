@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport"
+              content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+        <meta http-equiv="X-UA-Compatible" content="ie=edge">
+        <title>安卓电视播放器控制台</title>
+        <link rel="icon" type="image/x-icon"
+              href="data:image/x-icon;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQEAYAAABPYyMiAAAABmJLR0T///////8JWPfcAAAACXBIWXMAAABIAAAASABGyWs+AAAAF0lEQVRIx2NgGAWjYBSMglEwCkbBSAcACBAAAeaR9cIAAAAASUVORK5CYII="/>
+        <!--android raw 下的id只用到文件名(不含后缀),所以,命名要唯一-->
+        <script src="vue.js?202008011449"></script>
+        <script>
+            document.write('<link rel="stylesheet" href="css.css?rnd=' + +new Date + '">');
+        </script>
+    </head>
+    <body>
+        <div id="app">
+            <i class="toast" v-html="toast"></i>
+            <!--
+
+            https://mojing.huoyanzuida.com/20200529/6324_7a17a32a/index.m3u8
+
+    https://www.hobiao.com/vodplay/787437-2-33/
+            -->
+            <input v-model.trim="media_url" class="media_url" onclick="this.select();"
+                   placeholder="视频链接或含视频页面链接"/>
+            <input v-model.trim="media_position" class="media_position" onclick="this.select();"
+                   type="number" step="1" min="0"
+                   placeholder="快进到..."/>
+            <input type="button" class="btn" value="发送" @click="send_url()"/>
+            <input type="button" class="btn" value="播放/暂停" @click="play_pause_toggle()"/>
+            <input type="button" class="btn" value="定位" @click="seek()"/>
+
+        </div>
+
+        <script type="text/javascript">
+            document.write('<script src="/js.js?rnd=' + +new Date + '"><\/script>');
+        </script>
+    </body>
+</html>
