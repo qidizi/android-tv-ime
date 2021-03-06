@@ -7,7 +7,7 @@
 1.  手机扫码控制、发送视频链接或含视频的页面链接     
 
 ## 使用方法   
-1.  [从releases下载最新版本](./releases);    
+1.  [从releases下载最新版本](https://github.com/qidizi/android-tv-player/releases);    
 1.  安装至安卓电视;   
 1.  运行本应用;  
 1.  微信扫码后使用;  
